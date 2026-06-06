@@ -1,6 +1,6 @@
 # Geyser PRO - Home Assistant Add-on
 
-[![Version](https://img.shields.io/badge/version-0.6.8-green.svg)](https://github.com/mad_teo26/ha-geyser-pro)
+[![Version](https://img.shields.io/badge/version-0.6.8-green.svg)](https://github.com/madteo26/ha-geyser-pro)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Home Assistant add-on for the **Stocker Geyser PRO** mosquito repellent system.
@@ -41,7 +41,7 @@ Home Assistant add-on for the **Stocker Geyser PRO** mosquito repellent system.
 
 1. In Home Assistant, go to **Settings → Add-ons → Add-on Store**
 2. Click the **⋮** menu → **Repositories**
-3. Add: `https://github.com/mad_teo26/ha-geyser-pro`
+3. Add: `https://github.com/madteo26/ha-geyser-pro`
 4. Find **Geyser PRO** and click **Install**
 
 ### Configuration
@@ -101,7 +101,7 @@ https://YOUR-NABU-CASA-URL.ui.nabu.casa/api/webhook/geyser_vento_forte
 
 ## Support
 
-- [Issues](https://github.com/mad_teo26/ha-geyser-pro/issues)
+- [Issues](https://github.com/madteo26/ha-geyser-pro/issues)
 - [Home Assistant Community](https://community.home-assistant.io)
 
 ## License
