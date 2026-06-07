@@ -554,7 +554,7 @@ function buildStrategies(states) {
         <div class="row-name">${name}</div>
       </div>
       <label class="toggle" style="margin-right:6px;">
-        <input type="checkbox" ${active ? 'checked' : ''} onchange="callService('switch','toggle','${s.entity_id}')">
+        <input type="checkbox" ${active ? 'checked' : ''} onchange="callService('switch', this.checked ? 'turn_on' : 'turn_off', '${s.entity_id}')">
         <span class="tog-slider"></span>
       </label>
       ${numId ? `<button class="btn-delete" onclick="deleteStrategy(${numId})" title="Elimina">🗑</button>` : ''}`;
@@ -627,7 +627,7 @@ function buildCycles(states) {
       div.innerHTML = `
         <div style="flex:1"><div class="row-name" style="font-size:13px;">${name}</div></div>
         <label class="toggle" style="margin-right:6px;">
-          <input type="checkbox" ${active ? 'checked' : ''} onchange="callService('switch','toggle','${s.entity_id}')">
+          <input type="checkbox" ${active ? 'checked' : ''} onchange="callService('switch', this.checked ? 'turn_on' : 'turn_off', '${s.entity_id}')">
           <span class="tog-slider"></span>
         </label>
         ${cycleId ? `<button class="btn-delete" onclick="deleteCycle(${cycleId})" title="Elimina">🗑</button>` : ''}`;

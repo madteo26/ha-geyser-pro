@@ -65,13 +65,16 @@ DEVICE_INFO = {
     "name":         "Geyser PRO",
     "manufacturer": "Stocker",
     "model":        "Geyser PRO",
-    "sw_version": "0.6.8",
+    "sw_version": "0.7.1",
 }
 
 # Cache strategie, topic pubblicati e nomi serbatoi
 _strategies_cache = []
 _published_obj_ids = _load_published_ids()  # carica da disco per cleanup orfani
 _tank_names = {0: "Pulizia", 1: "S1", 2: "S2"}
+# Stati impostati localmente da HA (non sovrascrivere durante reload per 10 minuti)
+_local_overrides = {}  # {strategy_id: (active, timestamp)}
+_OVERRIDE_TTL = 600    # 10 minuti
 
 # ------------------------------------------------------------------
 # Topic helpers
@@ -210,9 +213,22 @@ def publish_strategy_discovery(client: mqtt.Client, strategies: list):
 
 
 def publish_strategy_states(client: mqtt.Client, strategies: list):
+    now = time.time()
     for s in strategies:
+        sid = s["id"]
+        # Controlla override locale: se impostato da HA negli ultimi _OVERRIDE_TTL secondi, non sovrascrivere
+        if sid in _local_overrides:
+            override_active, override_ts = _local_overrides[sid]
+            if now - override_ts < _OVERRIDE_TTL:
+                state = "ON" if override_active else "OFF"
+                logger.debug("Strategia %d: uso override locale (%s)", sid, state)
+                client.publish(state_topic(f"strategia_{sid}"), state, retain=True)
+                continue
+            else:
+                del _local_overrides[sid]
         state = "ON" if s["active"] else "OFF"
-        client.publish(state_topic(f"strategia_{s['id']}"), state, retain=True)
+        logger.debug("Reload strategia %d → %s (webapp)", sid, state)
+        client.publish(state_topic(f"strategia_{sid}"), state, retain=True)
         # Pubblica output_valve come attributo JSON
         attrs = json.dumps({
             "output_valve": s.get("output_valve", 1),
@@ -371,6 +387,8 @@ def handle_strategy_toggle(client: mqtt.Client, strategy_id: int, payload: str):
         for s in _strategies_cache:
             if s["id"] == strategy_id:
                 s["active"] = active
+        # Registra override locale per evitare sovrascrittura dal reload
+        _local_overrides[strategy_id] = (active, time.time())
         logger.info("Strategia %d → %s", strategy_id, state)
     else:
         logger.error("Set_StrategyStatus fallito per strategia %d", strategy_id)
@@ -532,7 +550,9 @@ def reload_strategies(client: mqtt.Client):
                         tank_name = _tank_names.get(tank_num, "")
                         if tank_name:
                             label += f" · {tank_name}"
+                        c["active"] = bool(detail.get("active", True))
                         c["label"] = label
+                        logger.debug("Ciclo %d: %s (active=%s)", c["id"], label, c["active"])
                 except Exception as e:
                     logger.debug("Get_Cycle %d fallito: %s", c["id"], e)
         # Log per debug label cicli
@@ -565,7 +585,7 @@ def on_connect(client, userdata, flags, reason_code, properties=None):
 def main():
     global geyser_api, _strategies_cache
 
-    logger.info("=== Geyser PRO Addon v0.6.8 avviato ===")
+    logger.info("=== Geyser PRO Addon v0.7.1 avviato ===")
     logger.info("Poll interval: %d sec", POLL_INTERVAL)
 
     geyser_api = GeyserAPI(EMAIL, PASSWORD)
@@ -654,8 +674,9 @@ def main():
                         tank_name = _tank_names.get(tank_num, "")
                         if tank_name:
                             label += f" · {tank_name}"
+                        c["active"] = bool(detail.get("active", True))
                         c["label"] = label
-                        logger.debug("Ciclo %d: %s", c["id"], label)
+                        logger.debug("Ciclo %d: %s (active=%s)", c["id"], label, c["active"])
                 except Exception as e:
                     logger.debug("Get_Cycle %d fallito: %s", c["id"], e)
         publish_strategy_discovery(client, _strategies_cache)
