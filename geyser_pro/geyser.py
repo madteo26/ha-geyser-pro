@@ -297,7 +297,7 @@ class GeyserAPI:
 
         except Exception as e:
             logger.error("get_strategies fallito: %s", e)
-            return []
+            return None  # None = errore, [] = davvero vuoto
 
     def get_cycle(self, cycle_id: int):
         """Recupera i dettagli di un ciclo: orario, durata, giorni."""

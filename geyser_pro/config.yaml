@@ -1,7 +1,8 @@
 name: "Geyser PRO"
-version: "0.7.1"
+version: "0.7.2"
 slug: geyser_pro
-description: "Integrazione per Stocker Geyser PRO antizanzare - MQTT autodiscovery"
+description: "Home Assistant integration for Stocker Geyser PRO mosquito repellent systems. MQTT autodiscovery, full CRUD for strategies and cycles, multi-zone support."
+url: "https://github.com/madteo26/ha-geyser-pro"
 startup: services
 boot: auto
 init: false
@@ -10,6 +11,9 @@ host_network: true
 arch:
   - aarch64
   - amd64
+  - armv7
+  - armhf
+  - i386
 
 options:
   email: ""

@@ -2,9 +2,15 @@
 
 All notable changes to the Geyser PRO Home Assistant add-on.
 
+## [0.7.2] - 2026-06-08
+### Fixed
+- Dashboard no longer goes blank after extended uptime
+- Periodic reload now skips update if API returns error (None) to preserve existing entities
+- `get_strategies()` now returns `None` on error vs `[]` for truly empty (distinguishes API failure from user deleting all strategies)
+
 ## [0.7.1] - 2026-06-07
 ### Fixed
-- Cycle active states now read from `Get_Cycle` API instead of HTML parsing (HTML uses JavaScript for toggle states, making static parsing unreliable)
+- Cycle active states now read from `Get_Cycle` API instead of unreliable HTML parsing
 - All cycles now correctly reflect their actual ON/OFF state from the Stocker cloud
 
 ## [0.7.0] - 2026-06-07

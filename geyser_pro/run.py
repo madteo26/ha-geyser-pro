@@ -65,7 +65,7 @@ DEVICE_INFO = {
     "name":         "Geyser PRO",
     "manufacturer": "Stocker",
     "model":        "Geyser PRO",
-    "sw_version": "0.7.1",
+    "sw_version": "0.7.2",
 }
 
 # Cache strategie, topic pubblicati e nomi serbatoi
@@ -509,7 +509,11 @@ def reload_strategies(client: mqtt.Client):
     global _strategies_cache
     logger.info("Ricaricamento strategie...")
     new_strategies = geyser_api.get_strategies()
-    if new_strategies is not None:
+    # None = errore API → skip per non cancellare tutto
+    if new_strategies is None:
+        logger.warning("get_strategies() ha fallito (None) — skip reload per preservare entità.")
+        return
+    if True:  # sempre procedi se ritorna lista (anche vuota = utente ha eliminato tutto)
         # Arricchisci cicli con Get_Cycle
         ALL_DAYS = '1111111' 
         for s in new_strategies:
@@ -585,7 +589,7 @@ def on_connect(client, userdata, flags, reason_code, properties=None):
 def main():
     global geyser_api, _strategies_cache
 
-    logger.info("=== Geyser PRO Addon v0.7.1 avviato ===")
+    logger.info("=== Geyser PRO Addon v0.7.2 avviato ===")
     logger.info("Poll interval: %d sec", POLL_INTERVAL)
 
     geyser_api = GeyserAPI(EMAIL, PASSWORD)
