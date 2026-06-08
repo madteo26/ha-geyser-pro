@@ -65,7 +65,7 @@ DEVICE_INFO = {
     "name":         "Geyser PRO",
     "manufacturer": "Stocker",
     "model":        "Geyser PRO",
-    "sw_version": "0.7.2",
+    "sw_version": "0.7.3",
 }
 
 # Cache strategie, topic pubblicati e nomi serbatoi
@@ -589,7 +589,7 @@ def on_connect(client, userdata, flags, reason_code, properties=None):
 def main():
     global geyser_api, _strategies_cache
 
-    logger.info("=== Geyser PRO Addon v0.7.2 avviato ===")
+    logger.info("=== Geyser PRO Addon v0.7.3 avviato ===")
     logger.info("Poll interval: %d sec", POLL_INTERVAL)
 
     geyser_api = GeyserAPI(EMAIL, PASSWORD)
@@ -690,7 +690,9 @@ def main():
 
     # Poll loop
     _reload_counter = 0
-    _RELOAD_EVERY   = max(1, 300 // POLL_INTERVAL)  # ogni ~5 minuti
+    _RELOAD_EVERY   = max(1, 300 // POLL_INTERVAL)   # ogni ~5 minuti
+    _restart_counter = 0
+    _RESTART_EVERY  = max(1, 14400 // POLL_INTERVAL)  # ogni ~4 ore
     while True:
         try:
             status = geyser_api.get_status()
@@ -705,6 +707,15 @@ def main():
                 _reload_counter = 0
                 logger.debug("Reload periodico strategie...")
                 reload_strategies(client)
+
+            # Riavvio automatico ogni 4 ore per mantenere sessione fresca
+            _restart_counter += 1
+            if _restart_counter >= _RESTART_EVERY:
+                logger.info("Riavvio automatico programmato (ogni 4 ore) — arrivederci!")
+                client.publish(state_topic("stato"), "Offline", retain=True)
+                client.loop_stop()
+                client.disconnect()
+                sys.exit(0)
         except Exception as e:
             logger.error("Errore nel poll loop: %s", e)
         time.sleep(POLL_INTERVAL)
