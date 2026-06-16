@@ -54,7 +54,13 @@ MQTT_HOST     = OPTIONS.get("mqtt_host", "core-mosquitto")
 MQTT_PORT     = int(OPTIONS.get("mqtt_port", 1883))
 MQTT_USER     = OPTIONS.get("mqtt_username", "")
 MQTT_PASS     = OPTIONS.get("mqtt_password", "")
-POLL_INTERVAL = int(OPTIONS.get("poll_interval", 7))
+POLL_INTERVAL   = int(OPTIONS.get("poll_interval", 7))
+ZONE_1_NAME     = OPTIONS.get("zone_1_name", "Zona 1")
+ZONE_2_NAME     = OPTIONS.get("zone_2_name", "Zona 2")
+DASHBOARD_TOKEN = OPTIONS.get("dashboard_token", "")
+ZONE_1_NAME   = OPTIONS.get("zone_1_name", "Zona 1")
+ZONE_2_NAME       = OPTIONS.get("zone_2_name", "Zona 2")
+DASHBOARD_TOKEN   = OPTIONS.get("dashboard_token", "")
 
 DEVICE_ID   = "geyser_pro"
 TOPIC_BASE  = "geyser_pro"
@@ -65,7 +71,7 @@ DEVICE_INFO = {
     "name":         "Geyser PRO",
     "manufacturer": "Stocker",
     "model":        "Geyser PRO",
-    "sw_version": "0.7.3",
+    "sw_version": "0.7.4",
 }
 
 # Cache strategie, topic pubblicati e nomi serbatoi
@@ -145,6 +151,22 @@ def publish_discovery(client: mqtt.Client):
             "payload_on": "ON", "payload_off": "OFF", "icon": "mdi:play-circle",
             "unique_id": f"{DEVICE_ID}_quickstart_attivo", "device": DEVICE_INFO,
         }),
+        ("sensor", "zona_1_nome", {
+            "name": "Zona 1 Nome", "state_topic": state_topic("zona_1_nome"),
+            "icon": "mdi:map-marker", "unique_id": f"{DEVICE_ID}_zona_1_nome", "device": DEVICE_INFO,
+        }),
+        ("sensor", "zona_2_nome", {
+            "name": "Zona 2 Nome", "state_topic": state_topic("zona_2_nome"),
+            "icon": "mdi:map-marker", "unique_id": f"{DEVICE_ID}_zona_2_nome", "device": DEVICE_INFO,
+        }),
+        ("sensor", "zona_1_nome", {
+            "name": "Zona 1 Nome", "state_topic": state_topic("zona_1_nome"),
+            "icon": "mdi:map-marker", "unique_id": f"{DEVICE_ID}_zona_1_nome", "device": DEVICE_INFO,
+        }),
+        ("sensor", "zona_2_nome", {
+            "name": "Zona 2 Nome", "state_topic": state_topic("zona_2_nome"),
+            "icon": "mdi:map-marker", "unique_id": f"{DEVICE_ID}_zona_2_nome", "device": DEVICE_INFO,
+        }),
         ("button", "quickstart_cmd", {
             "name": "Quick Start", "command_topic": cmd_topic("quickstart"),
             "icon": "mdi:play-circle-outline",
@@ -154,6 +176,10 @@ def publish_discovery(client: mqtt.Client):
     for component, obj_id, config in entities:
         client.publish(disc_topic(component, obj_id), json.dumps(config), retain=True)
     logger.info("MQTT autodiscovery pubblicato (%d entità base)", len(entities))
+    client.publish(state_topic("zona_1_nome"), ZONE_1_NAME, retain=True)
+    client.publish(state_topic("zona_2_nome"), ZONE_2_NAME, retain=True)
+    client.publish(state_topic("zona_1_nome"), ZONE_1_NAME, retain=True)
+    client.publish(state_topic("zona_2_nome"), ZONE_2_NAME, retain=True)
 
 
 def publish_strategy_discovery(client: mqtt.Client, strategies: list):
@@ -589,7 +615,20 @@ def on_connect(client, userdata, flags, reason_code, properties=None):
 def main():
     global geyser_api, _strategies_cache
 
-    logger.info("=== Geyser PRO Addon v0.7.3 avviato ===")
+    logger.info("=== Geyser PRO Addon v0.7.4 avviato ===")
+
+    # Scrivi token dashboard in /config/www/geyser_token.js
+    if DASHBOARD_TOKEN:
+        import os
+        for _www in ["/config/www", "/homeassistant/www", "/share/www"]:
+            try:
+                os.makedirs(_www, exist_ok=True)
+                with open(f"{_www}/geyser_token.js", "w") as _tf:
+                    _tf.write(f"var GEYSER_TOKEN = '{DASHBOARD_TOKEN}';\n")
+                logger.info("geyser_token.js scritto in %s", _www)
+                break
+            except Exception as _e:
+                logger.warning("Scrittura in %s fallita: %s", _www, _e)
     logger.info("Poll interval: %d sec", POLL_INTERVAL)
 
     geyser_api = GeyserAPI(EMAIL, PASSWORD)

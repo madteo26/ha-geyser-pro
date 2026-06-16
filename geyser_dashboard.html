@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Geyser PRO</title>
+<script src="/local/geyser_token.js" onerror=""></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap');
 
@@ -427,7 +428,13 @@
 
 <script>
 const HA_URL = window.location.origin;
-let TOKEN = document.querySelector('meta[name="ha-access-token"]')?.content || '';
+let TOKEN = (typeof GEYSER_TOKEN !== 'undefined' && GEYSER_TOKEN)
+  ? GEYSER_TOKEN
+  : (document.querySelector('meta[name="ha-access-token"]')?.content || '');
+// Nota: inserisci il token manualmente qui sotto se non usi l'opzione addon
+// TOKEN = 'IL_TUO_TOKEN';
+let _zoneName1 = 'Zona 1';
+let _zoneName2 = 'Zona 2';
 
 let haStates = {};
 let wsConn   = null;
@@ -455,6 +462,14 @@ let _lastStates = [];
 function updateUI(states) {
   haStates = states;
   _lastStates = states;
+
+  // Nomi zona da sensori HA
+  const _z1 = states.find(s => s.entity_id === 'sensor.geyser_pro_zona_1_nome');
+  const _z2 = states.find(s => s.entity_id === 'sensor.geyser_pro_zona_2_nome');
+  if (_z1 && _z1.state && !['unknown','unavailable'].includes(_z1.state)) { _zoneName1 = _z1.state; }
+  if (_z2 && _z2.state && !['unknown','unavailable'].includes(_z2.state)) { _zoneName2 = _z2.state; }
+  const _tb1 = document.getElementById('tab-zona1'); if (_tb1) _tb1.textContent = _zoneName1;
+  const _tb2 = document.getElementById('tab-zona2'); if (_tb2) _tb2.textContent = _zoneName2;
 
   const get = (eid) => {
     const s = states.find(s => s.entity_id === eid);
@@ -570,7 +585,20 @@ function buildStrategies(states) {
 
 function buildCycles(states) {
   const list = document.getElementById('cycles-list');
-  const allCycles = states.filter(s => s.entity_id.startsWith('switch.geyser_pro') && !s.entity_id.includes('strategia_'));
+  // Mappa strategy_id → zona
+  const stratZoneMap = {};
+  states.filter(s => s.entity_id.startsWith('switch.geyser_pro_strategia_')).forEach(s => {
+    const sid = s.attributes && s.attributes.strategy_id;
+    const ov  = parseInt(s.attributes && s.attributes.output_valve) || 1;
+    if (sid !== undefined) stratZoneMap[String(sid)] = ov;
+  });
+  // Cicli della zona corrente
+  const allCycles = states.filter(s => {
+    if (!s.entity_id.startsWith('switch.geyser_pro') || s.entity_id.includes('strategia_')) return false;
+    const sid = s.attributes && s.attributes.strategy_id;
+    if (sid === undefined) return true;
+    return (stratZoneMap[String(sid)] || 1) === _currentZona;
+  });
   list.innerHTML = '';
   if (!allCycles.length) return;
 
@@ -613,6 +641,7 @@ function buildCycles(states) {
       : null;
     header.innerHTML = `<span>${stratName}</span>${stratId ? `<button class="btn-add" style="width:auto;margin:0;padding:2px 8px;font-size:11px;" onclick="openCreateCycle(${stratId})">+ ciclo</button>` : ''}`;
     list.appendChild(header);
+    const stratActive = stratSwitch ? stratSwitch.state === 'on' : true;
     cycles.forEach(s => {
       const fn = (s.attributes.friendly_name || '').replace('Geyser PRO ', '');
       const name = fn.split(':').slice(1).join(':').trim() || fn;
@@ -624,6 +653,7 @@ function buildCycles(states) {
       const active = s.state === 'on';
       const div = document.createElement('div');
       div.className = 'row-item';
+      if (!stratActive) div.style.opacity = '0.35';
       div.innerHTML = `
         <div style="flex:1"><div class="row-name" style="font-size:13px;">${name}</div></div>
         <label class="toggle" style="margin-right:6px;">
