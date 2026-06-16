@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Geyser PRO</title>
-<script src="/local/geyser_token.js" onerror=""></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap');
 
@@ -322,7 +321,7 @@
         <div class="header-title" style="font-size:22px; font-weight:500;">Geyser PRO</div>
         <span id="conn-dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--amber);transition:background 0.3s;flex-shrink:0;" title="Stato connessione"></span>
       </div>
-      <div class="header-sub" id="last-sync" style="font-size:13px; margin-top:2px;">Stocker — sincronizzazione...</div>
+      <div class="header-sub" id="last-sync" style="font-size:13px; margin-top:2px;">Stocker — <span id="instance-label" style="color:var(--accent);font-weight:500;"></span> — <span id="sync-time">sincronizzazione...</span></div>
     </div>
   </div>
   <div class="status-pill" id="stato-pill" style="font-size:15px; padding:8px 20px; gap:10px;">
@@ -428,17 +427,16 @@
 
 <script>
 const HA_URL = window.location.origin;
-let TOKEN = (typeof GEYSER_TOKEN !== 'undefined' && GEYSER_TOKEN)
-  ? GEYSER_TOKEN
-  : (document.querySelector('meta[name="ha-access-token"]')?.content || '');
-// Nota: inserisci il token manualmente qui sotto se non usi l'opzione addon
-// TOKEN = 'IL_TUO_TOKEN';
-let _zoneName1 = 'Zona 1';
-let _zoneName2 = 'Zona 2';
+let TOKEN = document.querySelector('meta[name="ha-access-token"]')?.content || '';
 
-let haStates = {};
-let wsConn   = null;
-let wsId     = 1;
+let haStates   = {};
+let wsConn     = null;
+let wsId       = 1;
+// Istanza attiva — auto-rilevata dalle entità HA
+let INSTANCE_ID  = 'default';
+let ENTITY_PRE   = 'geyser_pro_default';
+let TOPIC_PRE    = 'geyser_pro_default';
+let _instanceMap = {};
 
 document.getElementById('qs-dur').oninput = function() {
   document.getElementById('qs-dur-label').textContent = this.value + 's';
@@ -459,46 +457,92 @@ function setBar(id, pct) {
 }
 
 let _lastStates = [];
+function detectInstances(states) {
+  const re = /^sensor\.geyser_pro_(.+)_stato$/;
+  const instances = [];
+  states.forEach(s => {
+    const m = s.entity_id.match(re);
+    if (m && !instances.includes(m[1])) instances.push(m[1]);
+  });
+  // Fallback per istanza 'default' senza suffisso (vecchio formato)
+  // Nessuna istanza trovata
+  if (instances.length === 0) instances.push('default');
+  return instances;
+}
+
+function updateInstanceSelector(instances) {
+  let sel = document.getElementById('instance-selector');
+  if (!sel) return;
+  // Mostra solo se ci sono più istanze
+  sel.style.display = instances.length > 1 ? 'flex' : 'none';
+  sel.innerHTML = '';
+  instances.forEach(id => {
+    const btn = document.createElement('button');
+    btn.className = 'zone-btn' + (id === INSTANCE_ID ? ' active' : '');
+    btn.textContent = id.charAt(0).toUpperCase() + id.slice(1);
+    btn.onclick = () => {
+      INSTANCE_ID = id;
+      ENTITY_PRE  = 'geyser_pro_' + INSTANCE_ID;
+      TOPIC_PRE   = 'geyser_pro_' + INSTANCE_ID;
+      sel.querySelectorAll('.zone-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      if (_lastStates) updateUI(_lastStates);
+    };
+    sel.appendChild(btn);
+  });
+}
+
 function updateUI(states) {
   haStates = states;
   _lastStates = states;
 
-  // Nomi zona da sensori HA
-  const _z1 = states.find(s => s.entity_id === 'sensor.geyser_pro_zona_1_nome');
-  const _z2 = states.find(s => s.entity_id === 'sensor.geyser_pro_zona_2_nome');
-  if (_z1 && _z1.state && !['unknown','unavailable'].includes(_z1.state)) { _zoneName1 = _z1.state; }
-  if (_z2 && _z2.state && !['unknown','unavailable'].includes(_z2.state)) { _zoneName2 = _z2.state; }
-  const _tb1 = document.getElementById('tab-zona1'); if (_tb1) _tb1.textContent = _zoneName1;
-  const _tb2 = document.getElementById('tab-zona2'); if (_tb2) _tb2.textContent = _zoneName2;
+  // Auto-detect istanze disponibili
+  const instances = detectInstances(states);
+  // Prima volta: auto-seleziona la prima istanza trovata
+  if (INSTANCE_ID === 'default' && instances.length > 0 && instances[0] !== 'default') {
+    INSTANCE_ID = instances[0];
+  }
+  // Aggiorna ENTITY_PRE e TOPIC_PRE dalla mappa
+  if (_instanceMap[INSTANCE_ID]) {
+    ENTITY_PRE = _instanceMap[INSTANCE_ID].entityPre;
+    TOPIC_PRE  = _instanceMap[INSTANCE_ID].topicPre;
+  } else {
+    ENTITY_PRE = 'geyser_pro_' + INSTANCE_ID;
+    TOPIC_PRE  = 'geyser_pro_' + INSTANCE_ID;
+  }
+  updateInstanceSelector(instances);
+  // Mostra nome istanza nel sottotitolo
+  const lbl = document.getElementById('instance-label');
+  if (lbl) lbl.textContent = instanceLabel(INSTANCE_ID);
 
   const get = (eid) => {
     const s = states.find(s => s.entity_id === eid);
     return s ? s.state : null;
   };
 
-  const stato = get('sensor.geyser_pro_stato') || '—';
+  const stato = get(`sensor.${ENTITY_PRE}_stato`) || '—';
   document.getElementById('stato-text').textContent = stato;
 
   const pill = document.getElementById('stato-pill');
   pill.className = 'status-pill';
   if (stato === 'Nebulizzazione' || stato === 'Preparazione') pill.classList.add('nebulizing');
 
-  const alert = get('binary_sensor.geyser_pro_allarme');
+  const alert = get(`binary_sensor.${ENTITY_PRE}_alert`);
   document.getElementById('alert-box').style.display = alert === 'on' ? 'flex' : 'none';
 
-  const bat = parseInt(get('sensor.geyser_pro_batteria')) || 0;
+  const bat = parseInt(get(`sensor.${ENTITY_PRE}_batteria`)) || 0;
   document.getElementById('batteria').textContent = bat + '%';
   setBar('bar-bat', bat);
 
-  const s1 = parseInt(get('sensor.geyser_pro_serbatoio_1')) || 0;
-  const s2 = parseInt(get('sensor.geyser_pro_serbatoio_2')) || 0;
+  const s1 = parseInt(get(`sensor.${ENTITY_PRE}_serbatoio_1`)) || 0;
+  const s2 = parseInt(get(`sensor.${ENTITY_PRE}_serbatoio_2`)) || 0;
   document.getElementById('s1-pct').textContent = s1 + '%';
   document.getElementById('s2-pct').textContent = s2 + '%';
   setBar('bar-s1', s1);
   setBar('bar-s2', s2);
 
-  const l1 = get('sensor.geyser_pro_liquido_serbatoio_1') || '';
-  const l2 = get('sensor.geyser_pro_liquido_serbatoio_2') || '';
+  const l1 = get(`sensor.${ENTITY_PRE}_liquido_1`) || '';
+  const l2 = get(`sensor.${ENTITY_PRE}_liquido_2`) || '';
   const l1name = l1.split('(')[0].trim() || 'Serbatoio 1';
   const l2name = l2.split('(')[0].trim() || 'Serbatoio 2';
   document.getElementById('s1-name').textContent = l1name || '—';
@@ -515,14 +559,14 @@ function updateUI(states) {
   if (co1 && l1) co1.textContent = l1name;
   if (co2 && l2) co2.textContent = l2name;
 
-  const next = get('sensor.geyser_pro_prossimo_trattamento') || '—';
+  const next = get(`sensor.${ENTITY_PRE}_prossimo_trattamento`) || '—';
   document.getElementById('next-t').textContent = next.split(' - ')[0] || next;
 
-  const sync = get('sensor.geyser_pro_ultimo_sync') || '';
-  if (sync) document.getElementById('last-sync').textContent = 'Stocker — sync ' + sync;
+  const sync = get(`sensor.${ENTITY_PRE}_sincronizzato`) || '';
+  if (sync) { const st = document.getElementById('sync-time'); if (st) st.textContent = 'sync ' + sync; }
 
-  const qsAvail = get('binary_sensor.geyser_pro_quick_start_disponibile');
-  const qsAttivo = get('binary_sensor.geyser_pro_quick_start_attivo');
+  const qsAvail = get(`binary_sensor.${ENTITY_PRE}_quick_start_disponibile`);
+  const qsAttivo = get(`binary_sensor.${ENTITY_PRE}_quick_start_attivo`);
   const qsBtn = document.getElementById('qs-btn');
   const qsText = document.getElementById('qs-status-text');
 
@@ -546,7 +590,7 @@ function updateUI(states) {
 
 function buildStrategies(states) {
   const list = document.getElementById('strategies-list');
-  let switches = states.filter(s => s.entity_id.startsWith('switch.geyser_pro_strategia_'));
+  let switches = states.filter(s => s.entity_id.startsWith(`switch.${ENTITY_PRE}_strategia_`));
   if (!switches.length) { list.innerHTML = ''; return; }
   // Filtra per zona corrente
   switches = switches.filter(s => {
@@ -555,7 +599,10 @@ function buildStrategies(states) {
   });
   list.innerHTML = '';
   switches.forEach(s => {
-    const rawId = s.entity_id.replace('switch.geyser_pro_strategia_strategia_', '').replace('switch.geyser_pro_strategia_', '');
+    const rawId = s.entity_id.replace(`switch.${ENTITY_PRE}_strategia_${ENTITY_PRE}_strategia_`, '').replace(`switch.${ENTITY_PRE}_strategia_`, '');
+    // friendly_name = "Strategia: NomeStrategia"
+    const fnRaw = (s.attributes.friendly_name || '');
+    const sname = fnRaw.replace('Strategia: ', '') || rawId;
     // strategy_id dall'attributo MQTT (più affidabile)
     const numId = s.attributes && s.attributes.strategy_id
       ? String(s.attributes.strategy_id)
@@ -585,26 +632,13 @@ function buildStrategies(states) {
 
 function buildCycles(states) {
   const list = document.getElementById('cycles-list');
-  // Mappa strategy_id → zona
-  const stratZoneMap = {};
-  states.filter(s => s.entity_id.startsWith('switch.geyser_pro_strategia_')).forEach(s => {
-    const sid = s.attributes && s.attributes.strategy_id;
-    const ov  = parseInt(s.attributes && s.attributes.output_valve) || 1;
-    if (sid !== undefined) stratZoneMap[String(sid)] = ov;
-  });
-  // Cicli della zona corrente
-  const allCycles = states.filter(s => {
-    if (!s.entity_id.startsWith('switch.geyser_pro') || s.entity_id.includes('strategia_')) return false;
-    const sid = s.attributes && s.attributes.strategy_id;
-    if (sid === undefined) return true;
-    return (stratZoneMap[String(sid)] || 1) === _currentZona;
-  });
+  const allCycles = states.filter(s => s.entity_id.startsWith(`switch.${ENTITY_PRE}`) && !s.entity_id.includes('strategia_'));
   list.innerHTML = '';
   if (!allCycles.length) return;
 
   // Strategie della zona corrente
   const zoneStrategies = states.filter(s =>
-    s.entity_id.startsWith('switch.geyser_pro_strategia_') &&
+    s.entity_id.startsWith(`switch.${ENTITY_PRE}_strategia_`) &&
     (s.attributes.output_valve === undefined || parseInt(s.attributes.output_valve) === _currentZona)
   );
   const zoneStratNames = new Set(zoneStrategies.map(s =>
@@ -641,7 +675,6 @@ function buildCycles(states) {
       : null;
     header.innerHTML = `<span>${stratName}</span>${stratId ? `<button class="btn-add" style="width:auto;margin:0;padding:2px 8px;font-size:11px;" onclick="openCreateCycle(${stratId})">+ ciclo</button>` : ''}`;
     list.appendChild(header);
-    const stratActive = stratSwitch ? stratSwitch.state === 'on' : true;
     cycles.forEach(s => {
       const fn = (s.attributes.friendly_name || '').replace('Geyser PRO ', '');
       const name = fn.split(':').slice(1).join(':').trim() || fn;
@@ -653,7 +686,6 @@ function buildCycles(states) {
       const active = s.state === 'on';
       const div = document.createElement('div');
       div.className = 'row-item';
-      if (!stratActive) div.style.opacity = '0.35';
       div.innerHTML = `
         <div style="flex:1"><div class="row-name" style="font-size:13px;">${name}</div></div>
         <label class="toggle" style="margin-right:6px;">
@@ -692,7 +724,7 @@ function launchQuickstart() {
   fetch(`${HA_URL}/api/services/mqtt/publish`, {
     method: 'POST',
     headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ topic: 'geyser_pro/quickstart/cmd', payload })
+    body: JSON.stringify({ topic: `${TOPIC_PRE}/quickstart/cmd`, payload })
   })
   .then(() => {
     document.getElementById('qs-feedback').textContent = 'Comando inviato ✓';
@@ -750,7 +782,7 @@ async function syncNow() {
   const btn = document.getElementById('sync-btn');
   btn.textContent = '⏳ Sync...';
   btn.disabled = true;
-  await mqttPublish('geyser_pro/cmd/reload', {});
+  await mqttPublish(`${TOPIC_PRE}/cmd/reload`, {});
   setTimeout(() => {
     refreshStates();
     btn.innerHTML = '✅ Sync';
@@ -781,14 +813,14 @@ async function mqttPublish(topic, payload) {
 
 async function deleteStrategy(strategyId) {
   if (!confirm('Eliminare questa strategia e tutti i suoi cicli?')) return;
-  await mqttPublish('geyser_pro/cmd/delete_strategy', { strategy_id: strategyId });
+  await mqttPublish(`${TOPIC_PRE}/cmd/delete_strategy`, { strategy_id: strategyId });
   setTimeout(refreshStates, 3000);
   setTimeout(refreshStates, 6000);
 }
 
 async function deleteCycle(cycleId) {
   if (!confirm('Eliminare questo ciclo?')) return;
-  await mqttPublish('geyser_pro/cmd/delete_cycle', { cycle_id: cycleId });
+  await mqttPublish(`${TOPIC_PRE}/cmd/delete_cycle`, { cycle_id: cycleId });
   setTimeout(refreshStates, 3000);
   setTimeout(refreshStates, 6000);
 }
@@ -797,7 +829,7 @@ async function confirmCreateStrategy() {
   const name = document.getElementById('new-strategy-name').value.trim();
   const zone = parseInt(document.getElementById('new-strategy-zone').value);
   if (!name) return;
-  await mqttPublish('geyser_pro/cmd/create_strategy', { name, output_valve: zone });
+  await mqttPublish(`${TOPIC_PRE}/cmd/create_strategy`, { name, output_valve: zone });
   closeModal('modal-strategy');
   document.getElementById('new-strategy-name').value = '';
   setTimeout(refreshStates, 3000);
@@ -811,7 +843,7 @@ async function confirmCreateCycle() {
   const minute      = parseInt(document.getElementById('new-cycle-minute').value);
   const dur         = parseInt(document.getElementById('new-cycle-dur').value);
   const daysShifted = getDaysShifted();
-  await mqttPublish('geyser_pro/cmd/create_cycle', {
+  await mqttPublish(`${TOPIC_PRE}/cmd/create_cycle`, {
     strategy_id: strategyId, tank, hour, minute, nebulization: dur, days_shifted: daysShifted
   });
   closeModal('modal-cycle');
