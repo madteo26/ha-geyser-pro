@@ -1,5 +1,5 @@
 """
-Geyser PRO - Home Assistant Addon v0.8.2
+Geyser PRO - Home Assistant Addon v0.8.3
 MQTT bridge con autodiscovery per Stocker Geyser PRO.
 Multi-device ready: ogni device ha account Stocker, namespace MQTT, entity prefix,
 cache strategie e override locali separati.
@@ -41,7 +41,7 @@ POLL_INTERVAL = int(OPTIONS.get("poll_interval", 7))
 DASHBOARD_TOKEN = OPTIONS.get("dashboard_token", "")
 DISC_PREFIX = "homeassistant"
 TOPIC_ROOT = "geyser_pro"
-SW_VERSION = "0.8.2"
+SW_VERSION = "0.8.3"
 DEVICE_NAME_DEFAULT = "Geyser PRO"
 _OVERRIDE_TTL = 600  # 10 minuti
 
@@ -730,6 +730,7 @@ def write_dashboard_vars():
             with open(f"{www}/geyser_token.js", "w") as tf:
                 tf.write(f"var GEYSER_TOKEN = '{DASHBOARD_TOKEN}';\n")
                 tf.write(f"var GEYSER_DEVICES = {json.dumps(devices_payload, ensure_ascii=False)};\n")
+                tf.write(f"var GEYSER_DASHBOARD_VERSION = {json.dumps(SW_VERSION)};\n")
                 first_name = devices_payload[0]["name"] if devices_payload else DEVICE_NAME_DEFAULT
                 tf.write(f"var GEYSER_DEVICE_NAME = {json.dumps(first_name, ensure_ascii=False)};\n")
             logger.info("geyser_token.js scritto in %s (%d device)", www, len(devices_payload))
