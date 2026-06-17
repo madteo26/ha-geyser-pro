@@ -55,6 +55,11 @@ MQTT_PORT     = int(OPTIONS.get("mqtt_port", 1883))
 MQTT_USER     = OPTIONS.get("mqtt_username", "")
 MQTT_PASS     = OPTIONS.get("mqtt_password", "")
 POLL_INTERVAL   = int(OPTIONS.get("poll_interval", 7))
+DEVICE_NAME_DEFAULT = "Geyser PRO"
+DEVICE_NAME_OPTION  = str(OPTIONS.get("device_name", "") or "").strip()
+# Fonte unica della verità: options.json dell'add-on.
+# Niente override persistente: se l'utente cambia nome, deve cambiare subito.
+DEVICE_NAME = DEVICE_NAME_OPTION or DEVICE_NAME_DEFAULT
 ZONE_1_NAME     = OPTIONS.get("zone_1_name", "Zona 1")
 ZONE_2_NAME     = OPTIONS.get("zone_2_name", "Zona 2")
 DASHBOARD_TOKEN = OPTIONS.get("dashboard_token", "")
@@ -68,10 +73,10 @@ DISC_PREFIX = "homeassistant"
 
 DEVICE_INFO = {
     "identifiers":  [DEVICE_ID],
-    "name":         "Geyser PRO",
+    "name":         DEVICE_NAME,
     "manufacturer": "Stocker",
     "model":        "Geyser PRO",
-    "sw_version": "0.7.4",
+    "sw_version": "0.7.14",
 }
 
 # Cache strategie, topic pubblicati e nomi serbatoi
@@ -103,7 +108,13 @@ def publish_discovery(client: mqtt.Client):
     entities = [
         ("sensor", "stato", {
             "name": "Stato", "state_topic": state_topic("stato"),
+            "json_attributes_topic": state_topic("stato") + "_attr",
             "icon": "mdi:spray", "unique_id": f"{DEVICE_ID}_stato", "device": DEVICE_INFO,
+        }),
+        ("sensor", "device_name", {
+            "name": "Nome Device", "object_id": f"{DEVICE_ID}_device_name",
+            "state_topic": state_topic("device_name"),
+            "icon": "mdi:rename-box", "unique_id": f"{DEVICE_ID}_device_name", "device": DEVICE_INFO,
         }),
         ("sensor", "batteria", {
             "name": "Batteria", "state_topic": state_topic("batteria"),
@@ -176,6 +187,13 @@ def publish_discovery(client: mqtt.Client):
     for component, obj_id, config in entities:
         client.publish(disc_topic(component, obj_id), json.dumps(config), retain=True)
     logger.info("MQTT autodiscovery pubblicato (%d entità base)", len(entities))
+    client.publish(state_topic("device_name"), DEVICE_NAME, retain=True)
+    client.publish(state_topic("stato") + "_attr", json.dumps({
+        "device_name": DEVICE_NAME,
+        "model": "Geyser PRO",
+        "zone_1_name": ZONE_1_NAME,
+        "zone_2_name": ZONE_2_NAME,
+    }), retain=True)
     client.publish(state_topic("zona_1_nome"), ZONE_1_NAME, retain=True)
     client.publish(state_topic("zona_2_nome"), ZONE_2_NAME, retain=True)
     client.publish(state_topic("zona_1_nome"), ZONE_1_NAME, retain=True)
@@ -287,6 +305,7 @@ def publish_status(client: mqtt.Client, status: dict):
     qs_attivo   = "ON" if qs_status == 1 else "OFF"
 
     payloads = {
+        "device_name": DEVICE_NAME,
         "stato": stato, "batteria": battery,
         "serbatoio_1": tank1, "serbatoio_2": tank2,
         "prossimo_trattamento": next_t, "sincronizzato": sync_at,
@@ -296,8 +315,18 @@ def publish_status(client: mqtt.Client, status: dict):
     for obj_id, value in payloads.items():
         client.publish(state_topic(obj_id), str(value), retain=True)
 
-    logger.info("Stato: %s | Batteria: %d%% | S1: %d%% | S2: %d%% | QS: avail=%s attivo=%s",
-                stato, battery, tank1, tank2, qs_avail, qs_attivo)
+    client.publish(state_topic("stato") + "_attr", json.dumps({
+        "device_name": DEVICE_NAME,
+        "model": "Geyser PRO",
+        "zone_1_name": ZONE_1_NAME,
+        "zone_2_name": ZONE_2_NAME,
+        "battery_percent": battery,
+        "tank_1_fill": tank1,
+        "tank_2_fill": tank2,
+    }), retain=True)
+
+    logger.info("Device: %s | Stato: %s | Batteria: %d%% | S1: %d%% | S2: %d%% | QS: avail=%s attivo=%s",
+                DEVICE_NAME, stato, battery, tank1, tank2, qs_avail, qs_attivo)
 
 
 def publish_tank_info(client: mqtt.Client, tank_num: int, info: dict):
@@ -615,21 +644,22 @@ def on_connect(client, userdata, flags, reason_code, properties=None):
 def main():
     global geyser_api, _strategies_cache
 
-    logger.info("=== Geyser PRO Addon v0.7.4 avviato ===")
+    logger.info("=== Geyser PRO Addon v0.7.14 avviato ===")
 
-    # Scrivi token dashboard in /config/www/geyser_token.js
-    if DASHBOARD_TOKEN:
-        import os
-        for _www in ["/config/www", "/homeassistant/www", "/share/www"]:
-            try:
-                os.makedirs(_www, exist_ok=True)
-                with open(f"{_www}/geyser_token.js", "w") as _tf:
-                    _tf.write(f"var GEYSER_TOKEN = '{DASHBOARD_TOKEN}';\n")
-                logger.info("geyser_token.js scritto in %s", _www)
-                break
-            except Exception as _e:
-                logger.warning("Scrittura in %s fallita: %s", _www, _e)
-    logger.info("Poll interval: %d sec", POLL_INTERVAL)
+    # Scrivi token/dashboard vars in /config/www/geyser_token.js
+    import os
+    for _www in ["/config/www", "/homeassistant/www", "/share/www"]:
+        try:
+            os.makedirs(_www, exist_ok=True)
+            with open(f"{_www}/geyser_token.js", "w") as _tf:
+                _tf.write(f"var GEYSER_TOKEN = '{DASHBOARD_TOKEN}';\n")
+                _tf.write(f"var GEYSER_DEVICE_NAME = {json.dumps(DEVICE_NAME)};\n")
+            logger.info("geyser_token.js scritto in %s (option_device_name=%r, device_name=%s)",
+                        _www, DEVICE_NAME_OPTION, DEVICE_NAME)
+            break
+        except Exception as _e:
+            logger.warning("Scrittura in %s fallita: %s", _www, _e)
+    logger.info("Device name: %s | Poll interval: %d sec", DEVICE_NAME, POLL_INTERVAL)
 
     geyser_api = GeyserAPI(EMAIL, PASSWORD)
 

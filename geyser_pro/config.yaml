@@ -1,5 +1,5 @@
 name: "Geyser PRO"
-version: "0.7.4"
+version: "0.7.14"
 slug: geyser_pro
 description: "Home Assistant integration for Stocker Geyser PRO mosquito repellent systems. MQTT autodiscovery, full CRUD for strategies and cycles, multi-zone support."
 url: "https://github.com/madteo26/ha-geyser-pro"
@@ -27,6 +27,7 @@ options:
   mqtt_password: ""
   poll_interval: 7
   log_level: "info"
+  device_name: ""
   zone_1_name: "Zona 1"
   zone_2_name: "Zona 2"
   dashboard_token: ""
@@ -40,6 +41,7 @@ schema:
   mqtt_password: str
   poll_interval: int(3,300)
   log_level: list(debug|info|warning|error)
+  device_name: str?
   zone_1_name: str?
   zone_2_name: str?
   dashboard_token: str?

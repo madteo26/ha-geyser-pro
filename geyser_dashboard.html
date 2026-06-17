@@ -318,10 +318,10 @@
     <div class="logo" style="width:44px;height:44px;font-size:22px;border-radius:12px;">💧</div>
     <div>
       <div style="display:flex; align-items:center; gap:8px;">
-        <div class="header-title" style="font-size:22px; font-weight:500;">Geyser PRO</div>
+        <div class="header-title" id="device-title" style="font-size:22px; font-weight:500;">Geyser PRO</div>
         <span id="conn-dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--amber);transition:background 0.3s;flex-shrink:0;" title="Stato connessione"></span>
       </div>
-      <div class="header-sub" id="last-sync" style="font-size:13px; margin-top:2px;">Stocker — <span id="instance-label" style="color:var(--accent);font-weight:500;"></span> — <span id="sync-time">sincronizzazione...</span></div>
+      <div class="header-sub" id="last-sync" style="font-size:13px; margin-top:2px;">Stocker — <span id="instance-label" style="color:var(--green);font-weight:500;">Geyser PRO</span> — <span id="sync-time">sincronizzazione...</span></div>
     </div>
   </div>
   <div class="status-pill" id="stato-pill" style="font-size:15px; padding:8px 20px; gap:10px;">
@@ -425,17 +425,19 @@
 
 
 
+<script>document.write('<script src="/local/geyser_token.js?v=' + Date.now() + '"><\/script>');</script>
 <script>
 const HA_URL = window.location.origin;
-let TOKEN = document.querySelector('meta[name="ha-access-token"]')?.content || '';
+let CURRENT_DEVICE_NAME = '';
+let TOKEN = document.querySelector('meta[name="ha-access-token"]')?.content || (typeof GEYSER_TOKEN !== 'undefined' ? GEYSER_TOKEN : '');
 
 let haStates   = {};
 let wsConn     = null;
 let wsId       = 1;
 // Istanza attiva — auto-rilevata dalle entità HA
-let INSTANCE_ID  = 'default';
-let ENTITY_PRE   = 'geyser_pro_default';
-let TOPIC_PRE    = 'geyser_pro_default';
+let INSTANCE_ID  = 'single';
+let ENTITY_PRE   = 'geyser_pro';
+let TOPIC_PRE    = 'geyser_pro';
 let _instanceMap = {};
 
 document.getElementById('qs-dur').oninput = function() {
@@ -456,18 +458,162 @@ function setBar(id, pct) {
   el.style.background = barColor(pct);
 }
 
+
+// --- Helper robusti per entity_id HA che possono cambiare in base al friendly_name ---
+function escapeRegExp(v) {
+  return String(v || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function cleanFriendly(s) {
+  let fn = ((s && s.attributes && s.attributes.friendly_name) ? s.attributes.friendly_name : '').trim();
+  // HA può anteporre il nome dispositivo al friendly_name: "Casa Strategia: ...", "Matteo Strategia: ...".
+  // Togliamo sia il modello sia il nome corrente, e come fallback tagliamo tutto prima di "Strategia:".
+  const prefixes = ['Geyser PRO', CURRENT_DEVICE_NAME].filter(Boolean);
+  prefixes.forEach(p => {
+    fn = fn.replace(new RegExp('^' + escapeRegExp(p) + '\\s+', 'i'), '');
+  });
+  const idx = fn.toLowerCase().indexOf('strategia:');
+  if (idx > 0) fn = fn.slice(idx);
+  return fn.trim();
+}
+
+function getStateObj(states, candidates, friendlyHint = null, domain = null) {
+  for (const eid of candidates) {
+    const found = states.find(s => s.entity_id === eid);
+    if (found) return found;
+  }
+  if (!friendlyHint) return null;
+  const hint = friendlyHint.toLowerCase();
+  return states.find(s => {
+    if (domain && !s.entity_id.startsWith(domain + '.')) return false;
+    if (!s.entity_id.includes(ENTITY_PRE)) return false;
+    const fn = cleanFriendly(s).toLowerCase();
+    return fn === hint || fn.includes(hint);
+  }) || null;
+}
+
+function getStateVal(states, candidates, friendlyHint = null, domain = null) {
+  const obj = getStateObj(states, candidates, friendlyHint, domain);
+  return obj ? obj.state : null;
+}
+
+function getAttrVal(states, candidates, attrName, friendlyHint = null, domain = null) {
+  const obj = getStateObj(states, candidates, friendlyHint, domain);
+  if (!obj || !obj.attributes) return null;
+  const v = obj.attributes[attrName];
+  return (v !== undefined && v !== null && String(v).trim() !== '') ? String(v).trim() : null;
+}
+
+function validName(v) {
+  const s = String(v || '').trim();
+  return s && s !== 'unknown' && s !== 'unavailable' ? s : '';
+}
+
+function getEntityNumber(entityId) {
+  const m = String(entityId || '').match(/_(\d+)(?:$|_)/);
+  return m ? String(m[1]) : null;
+}
+
+function strategyName(s) {
+  return cleanFriendly(s).replace(/^Strategia:\s*/i, '').trim() || 'Strategia';
+}
+
+function strategyIdOf(s) {
+  if (s && s.attributes && s.attributes.strategy_id !== undefined) return String(s.attributes.strategy_id);
+  const m = String(s && s.entity_id || '').match(/strategia_(\d+)/);
+  return m ? String(m[1]) : getEntityNumber(s && s.entity_id);
+}
+
+function cycleIdOf(s) {
+  if (s && s.attributes && s.attributes.cycle_id !== undefined) return String(s.attributes.cycle_id);
+  const m = String(s && s.entity_id || '').match(/ciclo_(\d+)/);
+  return m ? String(m[1]) : getEntityNumber(s && s.entity_id);
+}
+
+function cycleStrategyIdOf(s) {
+  if (s && s.attributes && s.attributes.strategy_id !== undefined) return String(s.attributes.strategy_id);
+  return null;
+}
+
+function zoneOfStrategy(s) {
+  const ov = s && s.attributes ? s.attributes.output_valve : undefined;
+  const parsed = parseInt(ov);
+  return Number.isFinite(parsed) ? parsed : 1;
+}
+
+function isGeyserSwitch(s) {
+  return s && s.entity_id && s.entity_id.startsWith(`switch.${ENTITY_PRE}`);
+}
+
+function isStrategySwitch(s) {
+  if (!isGeyserSwitch(s)) return false;
+  const fn = cleanFriendly(s).toLowerCase();
+  return s.entity_id.includes('_strategia_') ||
+         fn.startsWith('strategia:') ||
+         (s.attributes && s.attributes.strategy_id !== undefined && s.attributes.cycle_id === undefined && s.attributes.output_valve !== undefined);
+}
+
+function isCycleSwitch(s) {
+  if (!isGeyserSwitch(s) || isStrategySwitch(s)) return false;
+  return s.entity_id.includes('ciclo_') || (s.attributes && s.attributes.cycle_id !== undefined);
+}
+
+function cycleLabel(s, fallbackStrategyName = '') {
+  let fn = cleanFriendly(s);
+  if (!fn) return 'Ciclo';
+  if (fn.includes(':')) return fn.split(':').slice(1).join(':').trim();
+  if (fallbackStrategyName && fn.startsWith(fallbackStrategyName)) {
+    return fn.slice(fallbackStrategyName.length).replace(/^[:\s]+/, '').trim() || fn;
+  }
+  return fn;
+}
+
+function setOptionText(selectId, value, text) {
+  const opt = document.querySelector(`#${selectId} option[value="${value}"]`);
+  if (opt) opt.textContent = text;
+}
+
+function applyZoneLabels(z1, z2) {
+  const zone1 = (z1 && z1 !== 'unknown' && z1 !== 'unavailable') ? z1 : 'Zona 1';
+  const zone2 = (z2 && z2 !== 'unknown' && z2 !== 'unavailable') ? z2 : 'Zona 2';
+
+  const tab1 = document.getElementById('tab-zona1');
+  const tab2 = document.getElementById('tab-zona2');
+  if (tab1) tab1.textContent = zone1;
+  if (tab2) tab2.textContent = zone2;
+
+  setOptionText('qs-zone', 1, `Zona 1 — ${zone1}`);
+  setOptionText('qs-zone', 2, `Zona 2 — ${zone2}`);
+  setOptionText('new-strategy-zone', 1, `Zona 1 — ${zone1}`);
+  setOptionText('new-strategy-zone', 2, `Zona 2 — ${zone2}`);
+}
+
+function escapeHtml(v) {
+  return String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+}
+
 let _lastStates = [];
 function detectInstances(states) {
-  const re = /^sensor\.geyser_pro_(.+)_stato$/;
   const instances = [];
+
+  // Formato attuale addon: sensor.geyser_pro_stato
+  if (states.some(s => s.entity_id === 'sensor.geyser_pro_stato')) {
+    instances.push('single');
+  }
+
+  // Eventuale formato multi-istanza futuro: sensor.geyser_pro_NOME_stato
+  const re = /^sensor\.geyser_pro_(.+)_stato$/;
   states.forEach(s => {
     const m = s.entity_id.match(re);
     if (m && !instances.includes(m[1])) instances.push(m[1]);
   });
-  // Fallback per istanza 'default' senza suffisso (vecchio formato)
-  // Nessuna istanza trovata
-  if (instances.length === 0) instances.push('default');
+
+  if (instances.length === 0) instances.push('single');
   return instances;
+}
+
+function instanceLabel(id) {
+  return id === 'single' ? '' : id.charAt(0).toUpperCase() + id.slice(1);
 }
 
 function updateInstanceSelector(instances) {
@@ -479,11 +625,16 @@ function updateInstanceSelector(instances) {
   instances.forEach(id => {
     const btn = document.createElement('button');
     btn.className = 'zone-btn' + (id === INSTANCE_ID ? ' active' : '');
-    btn.textContent = id.charAt(0).toUpperCase() + id.slice(1);
+    btn.textContent = instanceLabel(id) || 'Geyser PRO';
     btn.onclick = () => {
       INSTANCE_ID = id;
-      ENTITY_PRE  = 'geyser_pro_' + INSTANCE_ID;
-      TOPIC_PRE   = 'geyser_pro_' + INSTANCE_ID;
+      if (INSTANCE_ID === 'single') {
+        ENTITY_PRE = 'geyser_pro';
+        TOPIC_PRE  = 'geyser_pro';
+      } else {
+        ENTITY_PRE = 'geyser_pro_' + INSTANCE_ID;
+        TOPIC_PRE  = 'geyser_pro_' + INSTANCE_ID;
+      }
       sel.querySelectorAll('.zone-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       if (_lastStates) updateUI(_lastStates);
@@ -499,11 +650,14 @@ function updateUI(states) {
   // Auto-detect istanze disponibili
   const instances = detectInstances(states);
   // Prima volta: auto-seleziona la prima istanza trovata
-  if (INSTANCE_ID === 'default' && instances.length > 0 && instances[0] !== 'default') {
+  if (!instances.includes(INSTANCE_ID) && instances.length > 0) {
     INSTANCE_ID = instances[0];
   }
   // Aggiorna ENTITY_PRE e TOPIC_PRE dalla mappa
-  if (_instanceMap[INSTANCE_ID]) {
+  if (INSTANCE_ID === 'single') {
+    ENTITY_PRE = 'geyser_pro';
+    TOPIC_PRE  = 'geyser_pro';
+  } else if (_instanceMap[INSTANCE_ID]) {
     ENTITY_PRE = _instanceMap[INSTANCE_ID].entityPre;
     TOPIC_PRE  = _instanceMap[INSTANCE_ID].topicPre;
   } else {
@@ -511,38 +665,66 @@ function updateUI(states) {
     TOPIC_PRE  = 'geyser_pro_' + INSTANCE_ID;
   }
   updateInstanceSelector(instances);
-  // Mostra nome istanza nel sottotitolo
+
+  const configuredDeviceName = validName(typeof GEYSER_DEVICE_NAME !== 'undefined' ? GEYSER_DEVICE_NAME : '');
+  const attrDeviceName = getAttrVal(states, [
+    `sensor.${ENTITY_PRE}_stato`,
+    `sensor.geyser_pro_stato`
+  ], 'device_name', 'Stato', 'sensor');
+  const sensorDeviceName = getStateVal(states, [
+    `sensor.${ENTITY_PRE}_device_name`,
+    `sensor.${ENTITY_PRE}_nome_device`,
+    `sensor.${ENTITY_PRE}_nome_dispositivo`,
+    `sensor.geyser_pro_device_name`,
+    `sensor.geyser_pro_nome_device`,
+    `sensor.geyser_pro_nome_dispositivo`
+  ], 'Nome Device', 'sensor');
+  // Ordine voluto: stato HA live → eventuale sensore HA → file token come fallback.
+  // Così un vecchio geyser_token.js non tiene bloccato il titolo a "Casa".
+  const deviceName = validName(attrDeviceName) || validName(sensorDeviceName) || configuredDeviceName || instanceLabel(INSTANCE_ID) || 'Geyser PRO';
+  CURRENT_DEVICE_NAME = deviceName;
+
+  const title = document.getElementById('device-title');
+  if (title) title.textContent = deviceName;
+
   const lbl = document.getElementById('instance-label');
-  if (lbl) lbl.textContent = instanceLabel(INSTANCE_ID);
+  if (lbl) lbl.textContent = 'Geyser PRO';
 
-  const get = (eid) => {
-    const s = states.find(s => s.entity_id === eid);
-    return s ? s.state : null;
-  };
+  const get = (eid) => getStateVal(states, [eid]);
 
-  const stato = get(`sensor.${ENTITY_PRE}_stato`) || '—';
+  const z1Name = getStateVal(states, [`sensor.${ENTITY_PRE}_zona_1_nome`], 'Zona 1 Nome', 'sensor');
+  const z2Name = getStateVal(states, [`sensor.${ENTITY_PRE}_zona_2_nome`], 'Zona 2 Nome', 'sensor');
+  applyZoneLabels(z1Name, z2Name);
+
+  const stato = getStateVal(states, [`sensor.${ENTITY_PRE}_stato`], 'Stato', 'sensor') || '—';
   document.getElementById('stato-text').textContent = stato;
 
   const pill = document.getElementById('stato-pill');
   pill.className = 'status-pill';
   if (stato === 'Nebulizzazione' || stato === 'Preparazione') pill.classList.add('nebulizing');
 
-  const alert = get(`binary_sensor.${ENTITY_PRE}_alert`);
+  const alert = getStateVal(states, [`binary_sensor.${ENTITY_PRE}_alert`], 'Allarme', 'binary_sensor');
   document.getElementById('alert-box').style.display = alert === 'on' ? 'flex' : 'none';
 
-  const bat = parseInt(get(`sensor.${ENTITY_PRE}_batteria`)) || 0;
+  const bat = parseInt(getStateVal(states, [`sensor.${ENTITY_PRE}_batteria`], 'Batteria', 'sensor')) || 0;
   document.getElementById('batteria').textContent = bat + '%';
   setBar('bar-bat', bat);
 
-  const s1 = parseInt(get(`sensor.${ENTITY_PRE}_serbatoio_1`)) || 0;
-  const s2 = parseInt(get(`sensor.${ENTITY_PRE}_serbatoio_2`)) || 0;
+  const s1 = parseInt(getStateVal(states, [`sensor.${ENTITY_PRE}_serbatoio_1`], 'Serbatoio 1', 'sensor')) || 0;
+  const s2 = parseInt(getStateVal(states, [`sensor.${ENTITY_PRE}_serbatoio_2`], 'Serbatoio 2', 'sensor')) || 0;
   document.getElementById('s1-pct').textContent = s1 + '%';
   document.getElementById('s2-pct').textContent = s2 + '%';
   setBar('bar-s1', s1);
   setBar('bar-s2', s2);
 
-  const l1 = get(`sensor.${ENTITY_PRE}_liquido_1`) || '';
-  const l2 = get(`sensor.${ENTITY_PRE}_liquido_2`) || '';
+  const l1 = getStateVal(states, [
+    `sensor.${ENTITY_PRE}_liquido_1`,
+    `sensor.${ENTITY_PRE}_liquido_serbatoio_1`
+  ], 'Liquido Serbatoio 1', 'sensor') || '';
+  const l2 = getStateVal(states, [
+    `sensor.${ENTITY_PRE}_liquido_2`,
+    `sensor.${ENTITY_PRE}_liquido_serbatoio_2`
+  ], 'Liquido Serbatoio 2', 'sensor') || '';
   const l1name = l1.split('(')[0].trim() || 'Serbatoio 1';
   const l2name = l2.split('(')[0].trim() || 'Serbatoio 2';
   document.getElementById('s1-name').textContent = l1name || '—';
@@ -559,14 +741,23 @@ function updateUI(states) {
   if (co1 && l1) co1.textContent = l1name;
   if (co2 && l2) co2.textContent = l2name;
 
-  const next = get(`sensor.${ENTITY_PRE}_prossimo_trattamento`) || '—';
+  const next = getStateVal(states, [`sensor.${ENTITY_PRE}_prossimo_trattamento`], 'Prossimo Trattamento', 'sensor') || '—';
   document.getElementById('next-t').textContent = next.split(' - ')[0] || next;
 
-  const sync = get(`sensor.${ENTITY_PRE}_sincronizzato`) || '';
+  const sync = getStateVal(states, [
+    `sensor.${ENTITY_PRE}_sincronizzato`,
+    `sensor.${ENTITY_PRE}_ultimo_sync`
+  ], 'Ultimo Sync', 'sensor') || '';
   if (sync) { const st = document.getElementById('sync-time'); if (st) st.textContent = 'sync ' + sync; }
 
-  const qsAvail = get(`binary_sensor.${ENTITY_PRE}_quick_start_disponibile`);
-  const qsAttivo = get(`binary_sensor.${ENTITY_PRE}_quick_start_attivo`);
+  const qsAvail = getStateVal(states, [
+    `binary_sensor.${ENTITY_PRE}_quickstart_disponibile`,
+    `binary_sensor.${ENTITY_PRE}_quick_start_disponibile`
+  ], 'Quick Start Disponibile', 'binary_sensor');
+  const qsAttivo = getStateVal(states, [
+    `binary_sensor.${ENTITY_PRE}_quickstart_attivo`,
+    `binary_sensor.${ENTITY_PRE}_quick_start_attivo`
+  ], 'Quick Start Attivo', 'binary_sensor');
   const qsBtn = document.getElementById('qs-btn');
   const qsText = document.getElementById('qs-status-text');
 
@@ -590,39 +781,34 @@ function updateUI(states) {
 
 function buildStrategies(states) {
   const list = document.getElementById('strategies-list');
-  let switches = states.filter(s => s.entity_id.startsWith(`switch.${ENTITY_PRE}_strategia_`));
-  if (!switches.length) { list.innerHTML = ''; return; }
-  // Filtra per zona corrente
-  switches = switches.filter(s => {
-    const ov = s.attributes && s.attributes.output_valve;
-    return ov === undefined || parseInt(ov) === _currentZona;
-  });
+  let switches = states.filter(isStrategySwitch);
+
+  // Filtra per zona corrente usando output_valve, non il nome. Perché evidentemente i nomi uguali tra zone erano troppo facili.
+  switches = switches.filter(s => zoneOfStrategy(s) === _currentZona);
   list.innerHTML = '';
-  switches.forEach(s => {
-    const rawId = s.entity_id.replace(`switch.${ENTITY_PRE}_strategia_${ENTITY_PRE}_strategia_`, '').replace(`switch.${ENTITY_PRE}_strategia_`, '');
-    // friendly_name = "Strategia: NomeStrategia"
-    const fnRaw = (s.attributes.friendly_name || '');
-    const sname = fnRaw.replace('Strategia: ', '') || rawId;
-    // strategy_id dall'attributo MQTT (più affidabile)
-    const numId = s.attributes && s.attributes.strategy_id
-      ? String(s.attributes.strategy_id)
-      : (rawId.match(/\d+/) || [null])[0];
-    const name = (s.attributes.friendly_name || ('Strategia ' + rawId)).replace('Geyser PRO ', '').replace('Strategia: ', '');
-    const active = s.state === 'on';
-    const div = document.createElement('div');
-    div.className = 'row-item';
-    div.innerHTML = `
-      <div style="flex:1">
-        <div class="row-name">${name}</div>
-      </div>
-      <label class="toggle" style="margin-right:6px;">
-        <input type="checkbox" ${active ? 'checked' : ''} onchange="callService('switch', this.checked ? 'turn_on' : 'turn_off', '${s.entity_id}')">
-        <span class="tog-slider"></span>
-      </label>
-      ${numId ? `<button class="btn-delete" onclick="deleteStrategy(${numId})" title="Elimina">🗑</button>` : ''}`;
-    list.appendChild(div);
-  });
-  // Bottone nuova strategia
+
+  if (!switches.length) {
+    list.innerHTML = '<div class="row-item" style="color:var(--muted); font-size:13px;">Nessuna strategia in questa zona</div>';
+  } else {
+    switches.forEach(s => {
+      const numId = strategyIdOf(s);
+      const name = strategyName(s);
+      const active = s.state === 'on';
+      const div = document.createElement('div');
+      div.className = 'row-item';
+      div.innerHTML = `
+        <div style="flex:1">
+          <div class="row-name">${escapeHtml(name)}</div>
+        </div>
+        <label class="toggle" style="margin-right:6px;">
+          <input type="checkbox" ${active ? 'checked' : ''} onchange="callService('switch', this.checked ? 'turn_on' : 'turn_off', '${s.entity_id}')">
+          <span class="tog-slider"></span>
+        </label>
+        ${numId ? `<button class="btn-delete" onclick="deleteStrategy(${numId})" title="Elimina">🗑</button>` : ''}`;
+      list.appendChild(div);
+    });
+  }
+
   const addBtn = document.createElement('button');
   addBtn.className = 'btn-add';
   addBtn.textContent = '＋ Nuova strategia';
@@ -632,64 +818,55 @@ function buildStrategies(states) {
 
 function buildCycles(states) {
   const list = document.getElementById('cycles-list');
-  const allCycles = states.filter(s => s.entity_id.startsWith(`switch.${ENTITY_PRE}`) && !s.entity_id.includes('strategia_'));
   list.innerHTML = '';
-  if (!allCycles.length) return;
 
-  // Strategie della zona corrente
-  const zoneStrategies = states.filter(s =>
-    s.entity_id.startsWith(`switch.${ENTITY_PRE}_strategia_`) &&
-    (s.attributes.output_valve === undefined || parseInt(s.attributes.output_valve) === _currentZona)
-  );
-  const zoneStratNames = new Set(zoneStrategies.map(s =>
-    (s.attributes.friendly_name || '').replace('Geyser PRO ', '').replace('Strategia: ', '')
-  ));
+  const allStrategies = states.filter(isStrategySwitch);
+  const zoneStrategies = allStrategies.filter(s => zoneOfStrategy(s) === _currentZona);
+  const zoneStrategyIds = new Set(zoneStrategies.map(strategyIdOf).filter(Boolean));
+  const zoneStrategyNames = new Set(zoneStrategies.map(strategyName));
+  const cycles = states.filter(isCycleSwitch);
 
-  // Raggruppa cicli per nome strategia
-  const byStrategy = {};
-  allCycles.forEach(s => {
-    const fn = (s.attributes.friendly_name || '').replace('Geyser PRO ', '');
-    const stratName = fn.split(':')[0].trim();
-    if (!byStrategy[stratName]) byStrategy[stratName] = [];
-    byStrategy[stratName].push(s);
-  });
+  if (!zoneStrategies.length) {
+    list.innerHTML = '<div class="row-item" style="color:var(--muted); font-size:13px;">Nessun ciclo in questa zona</div>';
+    return;
+  }
 
-  // Aggiungi strategie di zona senza cicli (così compare il tasto + ciclo)
-  zoneStrategies.forEach(s => {
-    const sn = (s.attributes.friendly_name||'').replace('Geyser PRO ','').replace('Strategia: ','');
-    if (!byStrategy[sn]) byStrategy[sn] = [];
-  });
-
-  Object.entries(byStrategy).forEach(([stratName, cycles]) => {
-    if (!zoneStratNames.has(stratName)) return;
+  zoneStrategies.forEach(strat => {
+    const sid = strategyIdOf(strat);
+    const sname = strategyName(strat);
     const header = document.createElement('div');
     header.className = 'strategy-group-header';
-    const stratSwitch = zoneStrategies.find(s =>
-      (s.attributes.friendly_name||'').replace('Geyser PRO ','').replace('Strategia: ','') === stratName
-    );
-    // Usa strategy_id dall'attributo MQTT (funziona anche per nomi senza cifre)
-    const stratId = stratSwitch
-      ? (stratSwitch.attributes.strategy_id
-          ? String(stratSwitch.attributes.strategy_id)
-          : (stratSwitch.entity_id.match(/\d+/) || [null])[0])
-      : null;
-    header.innerHTML = `<span>${stratName}</span>${stratId ? `<button class="btn-add" style="width:auto;margin:0;padding:2px 8px;font-size:11px;" onclick="openCreateCycle(${stratId})">+ ciclo</button>` : ''}`;
+    header.innerHTML = `<span>${escapeHtml(sname)}</span>${sid ? `<button class="btn-add" style="width:auto;margin:0;padding:2px 8px;font-size:11px;" onclick="openCreateCycle(${sid})">+ ciclo</button>` : ''}`;
     list.appendChild(header);
-    cycles.forEach(s => {
-      const fn = (s.attributes.friendly_name || '').replace('Geyser PRO ', '');
-      const name = fn.split(':').slice(1).join(':').trim() || fn;
-      const m = s.entity_id.match(/ciclo_(\d+)/);
-      // cycle_id dall'attributo MQTT (più affidabile per cicli creati da HA)
-      const cycleId = s.attributes && s.attributes.cycle_id
-        ? String(s.attributes.cycle_id)
-        : (m ? m[1] : null);
-      const active = s.state === 'on';
+
+    const ownedCycles = cycles.filter(c => {
+      const csid = cycleStrategyIdOf(c);
+      if (csid) return csid === sid;
+
+      // Fallback solo se HA non espone ancora strategy_id negli attributi retained.
+      const fn = cleanFriendly(c);
+      const inferred = fn.includes(':') ? fn.split(':')[0].trim() : '';
+      return inferred === sname || zoneStrategyNames.has(inferred);
+    });
+
+    if (!ownedCycles.length) {
+      const empty = document.createElement('div');
+      empty.className = 'row-item';
+      empty.innerHTML = '<div class="row-name" style="font-size:12px;color:var(--muted);">Nessun ciclo</div>';
+      list.appendChild(empty);
+      return;
+    }
+
+    ownedCycles.forEach(c => {
+      const label = cycleLabel(c, sname);
+      const cycleId = cycleIdOf(c);
+      const active = c.state === 'on';
       const div = document.createElement('div');
       div.className = 'row-item';
       div.innerHTML = `
-        <div style="flex:1"><div class="row-name" style="font-size:13px;">${name}</div></div>
+        <div style="flex:1"><div class="row-name" style="font-size:13px;">${escapeHtml(label)}</div></div>
         <label class="toggle" style="margin-right:6px;">
-          <input type="checkbox" ${active ? 'checked' : ''} onchange="callService('switch', this.checked ? 'turn_on' : 'turn_off', '${s.entity_id}')">
+          <input type="checkbox" ${active ? 'checked' : ''} onchange="callService('switch', this.checked ? 'turn_on' : 'turn_off', '${c.entity_id}')">
           <span class="tog-slider"></span>
         </label>
         ${cycleId ? `<button class="btn-delete" onclick="deleteCycle(${cycleId})" title="Elimina">🗑</button>` : ''}`;
@@ -697,7 +874,6 @@ function buildCycles(states) {
     });
   });
 }
-
 
 async function callService(domain, service, entity_id) {
   try {
