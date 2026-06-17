@@ -1,6 +1,70 @@
 # Changelog
 
-All notable changes to the Geyser PRO Home Assistant add-on.
+## [0.8.2] - 2026-06-17
+### Fixed
+- Removed legacy top-level single-device fields from the add-on schema, so the configuration UI only exposes the `devices:` list.
+- Dashboard now treats `GEYSER_DEVICES` as the single source of truth and ignores stale legacy `sensor.geyser_pro_stato` entities from 0.7.x, preventing duplicate/offline zombie tabs.
+- Bumped backend software version to 0.8.1.
+
+## [0.8.0] - 2026-06-17
+### Added
+- Multi-device architecture based on `devices:` list in add-on configuration.
+- Each Geyser has its own Stocker account, `device_id`, friendly name, zone names, API session, strategy cache and local override cache.
+- Per-device MQTT namespace: `geyser_pro/<device_id>/...`.
+- Per-device Home Assistant entity prefix: `geyser_pro_<device_id>_*`.
+- Dashboard device selector, shown automatically when multiple devices are detected.
+- `/config/www/geyser_token.js` now exports `GEYSER_DEVICES` with device id, name, entity prefix and MQTT topic base.
+
+### Changed
+- Device friendly label field inside `devices:` renamed to `device_name` in default config/schema; `name` remains accepted as legacy alias.
+- Add-on version bumped to `0.8.0`.
+- MQTT client id changed to `geyser_pro_bridge`.
+- Strategy/cycle retained discovery cleanup is now isolated per device.
+- Quick Start, Sync, create/delete strategy and create/delete cycle commands are routed to the selected device namespace.
+
+### Backward compatibility
+- Legacy 0.7.x single-device options (`email`, `password`, `device_name`, `zone_1_name`, `zone_2_name`) are still accepted as fallback.
+- Recommended configuration is now the `devices:` list.
+
+## [0.7.14] - 2026-06-17
+### Fixed
+- Removed persistent `/data/device_name_override.txt` logic: `device_name` now has a single source of truth, the add-on configuration.
+- Dashboard now prefers live Home Assistant state attributes over `GEYSER_DEVICE_NAME` from `geyser_token.js`, avoiding stale names such as `Casa` after config changes.
+- Strategy and cycle labels now strip dynamic Home Assistant device prefixes like `Casa Strategia:` or `Matteo Strategia:`.
+
+## [0.7.13] - 2026-06-17
+### Fixed
+- Device friendly name no longer depends on a dedicated MQTT sensor being created by Home Assistant.
+- Dashboard loads `/local/geyser_token.js` with cache busting and reads `GEYSER_DEVICE_NAME` first.
+- `sensor.geyser_pro_stato` now exposes `device_name` as a JSON attribute for a robust fallback.
+
+## [0.7.11] - 2026-06-17
+### Fixed
+- `device_name` non ha più default forzato in `config.yaml`: il campo parte vuoto e non sovrascrive più il nome personalizzato durante rebuild/reload
+- Aggiunto override persistente in `/data/device_name_override.txt`: se Home Assistant ripropone il default `Geyser PRO`, l'addon mantiene l'ultimo nome personalizzato salvato
+- `geyser_token.js` viene scritto sempre con `GEYSER_DEVICE_NAME`, anche se il token dashboard è vuoto
+- Log più esplicito: mostra `option_device_name`, override e `device_name` effettivo
+
+## [0.7.10] - 2026-06-17
+### Fixed
+- Discovery MQTT del sensore device name forzato con `object_id: geyser_pro_device_name`, così Home Assistant non lo rinomina in base alla lingua/friendly name.
+- Dashboard: fallback su `GEYSER_DEVICE_NAME` scritto in `/config/www/geyser_token.js`, oltre ai possibili entity_id `device_name`, `nome_device`, `nome_dispositivo`.
+- Versione add-on allineata a `0.7.10`.
+
+## [0.7.9] - 2026-06-17
+### Fixed
+- `device_name` pubblicato anche nel poll loop, non solo in autodiscovery, così la dashboard vede subito il nome configurato.
+- Header dashboard: il titolo grande mostra il friendly name del device; il sottotitolo resta il modello/prodotto.
+
+## [0.7.8] - 2026-06-17
+### Added
+- Friendly name configurabile per il device tramite opzione add-on `device_name`
+- Nuovo sensore MQTT `sensor.geyser_pro_device_name`, pubblicato retained
+- Dashboard: titolo dinamico letto dal sensore `device_name`, con fallback a `Geyser PRO`
+
+### Changed
+- Nome dispositivo MQTT autodiscovery ora usa `device_name`
+- Versione software aggiornata a `0.7.8`
 
 ## [0.7.2] - 2026-06-08
 ### Fixed
