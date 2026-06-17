@@ -1,6 +1,6 @@
 # Geyser PRO - Home Assistant Add-on
 
-![Version](https://img.shields.io/badge/version-0.8.2-green.svg)
+![Version](https://img.shields.io/badge/version-0.8.3-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
 Home Assistant add-on for the **Stocker Geyser PRO** mosquito repellent system.
@@ -112,6 +112,22 @@ panel_custom:
 ```
 
 The token and device list are injected automatically via `dashboard_token` and `devices` in the add-on config.
+
+### Cache-safe dashboard
+
+From `0.8.3`, the dashboard is split into two files:
+
+- `geyser_dashboard.html`: stable loader, used by Home Assistant / browser.
+- `geyser_dashboard_app.html`: real dashboard app, fetched with cache-busting on every load.
+
+Copy both files into `/config/www/`:
+
+```text
+/config/www/geyser_dashboard.html
+/config/www/geyser_dashboard_app.html
+```
+
+This avoids stale browser cache on desktop and iOS/Companion App after dashboard updates.
 
 ## License
 

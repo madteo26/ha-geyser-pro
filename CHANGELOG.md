@@ -1,6 +1,16 @@
 # Changelog
 
-## [0.8.2] - 2026-06-17
+## [0.8.3] - 2026-06-17
+### Fixed
+- Dashboard cache issue fixed with a stable loader (`geyser_dashboard.html`) and a cache-busted app file (`geyser_dashboard_app.html`).
+- iOS / Home Assistant Companion App now fetches the dashboard app and token file with cache-busting instead of relying on stale WebView cache.
+- Added `GEYSER_DASHBOARD_VERSION` to `/config/www/geyser_token.js` for frontend diagnostics.
+
+### Changed
+- `sw_version` bumped to `0.8.3`.
+- Dashboard installation now requires copying both dashboard files to `/config/www/`.
+
+## [0.8.1] - 2026-06-17
 ### Fixed
 - Removed legacy top-level single-device fields from the add-on schema, so the configuration UI only exposes the `devices:` list.
 - Dashboard now treats `GEYSER_DEVICES` as the single source of truth and ignores stale legacy `sensor.geyser_pro_stato` entities from 0.7.x, preventing duplicate/offline zombie tabs.
