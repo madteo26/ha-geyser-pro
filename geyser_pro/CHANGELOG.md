@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.8.5] - 2026-06-18
+### Fixed
+- Dashboard Settings tab is now visible: `page-settings` is no longer nested inside `page-dashboard`, so switching to Settings does not hide the settings content together with the dashboard page.
+- Version bumped to `0.8.5`.
+
+## [0.8.4] - 2026-06-18
+### Added
+- Imported operational Stocker webapp settings into the dashboard Settings tab.
+- Added `Set_Settings` support for zone nozzle count, installed tube length and buzzer state.
+- Added `Set_Tank` support for tank liquid name, dilution percentage and liquid type.
+- Added per-device MQTT commands:
+  - `geyser_pro/<device_id>/cmd/set_geyser_settings`
+  - `geyser_pro/<device_id>/cmd/set_tank`
+- Added MQTT discovery/state sensors for zone settings, buzzer state and tank settings.
+
+### Changed
+- Dashboard Settings tab now performs real device setting writes instead of showing diagnostics only.
+- `sw_version` bumped to `0.8.4`.
+
 ## [0.8.3] - 2026-06-17
 ### Fixed
 - Dashboard cache issue fixed with a stable loader (`geyser_dashboard.html`) and a cache-busted app file (`geyser_dashboard_app.html`).

@@ -306,6 +306,103 @@ class GeyserAPI:
             return result.get("value")
         return None
 
+
+    def get_geyser_settings(self):
+        """
+        Legge dalla pagina impostazioni della webapp Stocker:
+          - nozzles / tube_length zona 1
+          - nozzles_2 / tube_length_2 zona 2
+          - buzzer_off
+        La webapp non usa un endpoint Get_Settings: i valori sono renderizzati
+        direttamente nell'HTML di index.php?id=4004. Sì, meraviglioso.
+        """
+        if not self._ensure_auth():
+            return None
+        try:
+            resp = self.session.get(f"{API_BASE}/index.php?id=4004", timeout=15)
+            resp.raise_for_status()
+            html = resp.text
+
+            def _input_value(field_id, default=None):
+                m = re.search(
+                    r'id=["\']' + re.escape(field_id) + r'["\'][^>]*\bvalue=["\']([^"\']*)["\']',
+                    html,
+                    re.IGNORECASE | re.DOTALL,
+                )
+                return m.group(1).strip() if m else default
+
+            def _int_value(field_id, default=None):
+                v = _input_value(field_id, default)
+                if v is None or str(v).strip() == "":
+                    return default
+                try:
+                    return int(float(str(v).replace(",", ".")))
+                except Exception:
+                    return default
+
+            def _num_text(field_id, default=None):
+                v = _input_value(field_id, default)
+                return str(v).strip() if v is not None else default
+
+            buzzer_m = re.search(
+                r'id=["\']form-geyser-buzzer_off["\'][^>]*',
+                html,
+                re.IGNORECASE | re.DOTALL,
+            )
+            # Nella webapp: checkbox checked => segnale acustico attivo => buzzer_off=false.
+            buzzer_off = None
+            if buzzer_m:
+                buzzer_off = "checked" not in buzzer_m.group(0).lower()
+
+            data = {
+                "nozzles": _int_value("form-geyser-nozzles"),
+                "tube_length": _num_text("form-geyser-tube_length"),
+                "nozzles_2": _int_value("form-geyser-nozzles_2"),
+                "tube_length_2": _num_text("form-geyser-tube_length_2"),
+                "buzzer_off": buzzer_off,
+            }
+            logger.debug("Impostazioni geyser lette da HTML: %s", data)
+            return data
+        except Exception as e:
+            logger.error("get_geyser_settings fallito: %s", e)
+            return None
+
+    def set_geyser_settings(self, nozzles, tube_length, nozzles_2=None, tube_length_2=None, buzzer_off=False) -> bool:
+        """
+        Endpoint webapp: Set_Settings
+        Payload osservato:
+        {
+          nozzles, tube_length, nozzles_2, tube_length_2, buzzer_off
+        }
+        """
+        result = self._auth_call("Set_Settings", {
+            "nozzles": nozzles,
+            "tube_length": tube_length,
+            "nozzles_2": nozzles_2,
+            "tube_length_2": tube_length_2,
+            "buzzer_off": bool(buzzer_off),
+        })
+        logger.debug("Set_Settings response: %s", result)
+        return result is not None and result.get("error_code", 1) == 0
+
+    def set_tank(self, tank, liquid, dilution, type_) -> bool:
+        """
+        Endpoint webapp: Set_Tank
+        Payload osservato:
+        {
+          tank, liquid, dilution, type
+        }
+        """
+        result = self._auth_call("Set_Tank", {
+            "tank": str(tank),
+            "liquid": liquid,
+            "dilution": dilution,
+            "type": type_,
+        })
+        logger.debug("Set_Tank response: %s", result)
+        return result is not None and result.get("error_code", 1) == 0
+
+
     def delete_strategy(self, strategy_id: int) -> bool:
         result = self._auth_call("Delete_Strategy", {"geyser_strategy_id": str(strategy_id)})
         return result is not None and result.get("error_code", 1) == 0

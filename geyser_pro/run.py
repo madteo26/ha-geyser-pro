@@ -1,5 +1,5 @@
 """
-Geyser PRO - Home Assistant Addon v0.8.3
+Geyser PRO - Home Assistant Addon v0.8.5
 MQTT bridge con autodiscovery per Stocker Geyser PRO.
 Multi-device ready: ogni device ha account Stocker, namespace MQTT, entity prefix,
 cache strategie e override locali separati.
@@ -41,7 +41,7 @@ POLL_INTERVAL = int(OPTIONS.get("poll_interval", 7))
 DASHBOARD_TOKEN = OPTIONS.get("dashboard_token", "")
 DISC_PREFIX = "homeassistant"
 TOPIC_ROOT = "geyser_pro"
-SW_VERSION = "0.8.3"
+SW_VERSION = "0.8.5"
 DEVICE_NAME_DEFAULT = "Geyser PRO"
 _OVERRIDE_TTL = 600  # 10 minuti
 
@@ -247,6 +247,50 @@ class GeyserDeviceWorker:
                 "name": "Zona 2 Nome", "state_topic": self.state_topic("zona_2_nome"),
                 "icon": "mdi:map-marker",
             }),
+            ("sensor", "zona_1_ugelli", {
+                "name": "Zona 1 Ugelli", "state_topic": self.state_topic("zona_1_ugelli"),
+                "icon": "mdi:sprinkler", "state_class": "measurement",
+            }),
+            ("sensor", "zona_1_tubo_m", {
+                "name": "Zona 1 Tubo", "state_topic": self.state_topic("zona_1_tubo_m"),
+                "unit_of_measurement": "m", "icon": "mdi:pipe", "state_class": "measurement",
+            }),
+            ("sensor", "zona_2_ugelli", {
+                "name": "Zona 2 Ugelli", "state_topic": self.state_topic("zona_2_ugelli"),
+                "icon": "mdi:sprinkler", "state_class": "measurement",
+            }),
+            ("sensor", "zona_2_tubo_m", {
+                "name": "Zona 2 Tubo", "state_topic": self.state_topic("zona_2_tubo_m"),
+                "unit_of_measurement": "m", "icon": "mdi:pipe", "state_class": "measurement",
+            }),
+            ("binary_sensor", "buzzer_off", {
+                "name": "Buzzer Off", "state_topic": self.state_topic("buzzer_off"),
+                "payload_on": "ON", "payload_off": "OFF", "icon": "mdi:volume-off",
+            }),
+            ("sensor", "tanica_1_nome", {
+                "name": "Tanica 1 Nome", "state_topic": self.state_topic("tanica_1_nome"),
+                "icon": "mdi:flask",
+            }),
+            ("sensor", "tanica_1_diluizione", {
+                "name": "Tanica 1 Diluizione", "state_topic": self.state_topic("tanica_1_diluizione"),
+                "unit_of_measurement": "%", "icon": "mdi:percent", "state_class": "measurement",
+            }),
+            ("sensor", "tanica_1_tipo", {
+                "name": "Tanica 1 Tipo", "state_topic": self.state_topic("tanica_1_tipo"),
+                "icon": "mdi:tag-outline",
+            }),
+            ("sensor", "tanica_2_nome", {
+                "name": "Tanica 2 Nome", "state_topic": self.state_topic("tanica_2_nome"),
+                "icon": "mdi:flask-outline",
+            }),
+            ("sensor", "tanica_2_diluizione", {
+                "name": "Tanica 2 Diluizione", "state_topic": self.state_topic("tanica_2_diluizione"),
+                "unit_of_measurement": "%", "icon": "mdi:percent", "state_class": "measurement",
+            }),
+            ("sensor", "tanica_2_tipo", {
+                "name": "Tanica 2 Tipo", "state_topic": self.state_topic("tanica_2_tipo"),
+                "icon": "mdi:tag-outline",
+            }),
             ("button", "quickstart_cmd", {
                 "name": "Quick Start", "command_topic": self.cmd_topic("quickstart"),
                 "icon": "mdi:play-circle-outline",
@@ -411,7 +455,55 @@ class GeyserDeviceWorker:
         dil = info.get("tank_dilution", "")
         label = f"{liquid} ({tipo} {dil}%)".strip() if tipo else liquid
         client.publish(self.state_topic(f"liquido_{tank_num}"), label, retain=True)
+        client.publish(self.state_topic(f"tanica_{tank_num}_nome"), str(liquid), retain=True)
+        client.publish(self.state_topic(f"tanica_{tank_num}_diluizione"), str(dil), retain=True)
+        client.publish(self.state_topic(f"tanica_{tank_num}_tipo"), str(tipo), retain=True)
+        client.publish(self.state_topic(f"liquido_{tank_num}") + "_attr", json.dumps({
+            "device_id": self.id,
+            "tank": tank_num,
+            "liquid": liquid,
+            "dilution": dil,
+            "type": tipo,
+        }), retain=True)
         logger.info("[%s] Serbatoio %d: %s", self.id, tank_num, label)
+
+    def publish_geyser_settings(self, client: mqtt.Client):
+        settings = self.api.get_geyser_settings()
+        if not settings:
+            logger.warning("[%s] Impostazioni Geyser non disponibili.", self.id)
+            return
+
+        payloads = {
+            "zona_1_ugelli": settings.get("nozzles"),
+            "zona_1_tubo_m": settings.get("tube_length"),
+            "zona_2_ugelli": settings.get("nozzles_2"),
+            "zona_2_tubo_m": settings.get("tube_length_2"),
+            "buzzer_off": "ON" if settings.get("buzzer_off") else "OFF",
+        }
+        for obj_id, value in payloads.items():
+            if value is not None:
+                client.publish(self.state_topic(obj_id), str(value), retain=True)
+
+        self.publish_status_attributes(
+            client,
+            nozzles=settings.get("nozzles"),
+            tube_length=settings.get("tube_length"),
+            nozzles_2=settings.get("nozzles_2"),
+            tube_length_2=settings.get("tube_length_2"),
+            buzzer_off=settings.get("buzzer_off"),
+        )
+
+    def publish_all_tanks(self, client: mqtt.Client):
+        for tank_num in [1, 2]:
+            info = self.api.get_tank(tank_num)
+            self.publish_tank_info(client, tank_num, info)
+            if info:
+                liquid = info.get("tank_liquid", "").split()[0] if info.get("tank_liquid") else f"S{tank_num}"
+                self.tank_names[tank_num] = liquid
+
+    def publish_device_settings(self, client: mqtt.Client):
+        self.publish_geyser_settings(client)
+        self.publish_all_tanks(client)
 
     # ------------------------------
     # API lifecycle
@@ -473,12 +565,7 @@ class GeyserDeviceWorker:
         return strategies
 
     def initial_load(self, client: mqtt.Client):
-        for tank_num in [1, 2]:
-            info = self.api.get_tank(tank_num)
-            self.publish_tank_info(client, tank_num, info)
-            if info:
-                liquid = info.get("tank_liquid", "").split()[0] if info.get("tank_liquid") else f"S{tank_num}"
-                self.tank_names[tank_num] = liquid
+        self.publish_device_settings(client)
 
         self.strategies_cache = self.api.get_strategies()
         if self.strategies_cache is None:
@@ -551,11 +638,79 @@ class GeyserDeviceWorker:
             self.handle_create_cycle(client, payload)
             return
 
+        if suffix == "cmd/set_geyser_settings":
+            self.handle_set_geyser_settings(client, payload)
+            return
+
+        if suffix == "cmd/set_tank":
+            self.handle_set_tank(client, payload)
+            return
+
         if suffix == "cmd/reload":
+            self.publish_device_settings(client)
             self.reload_strategies(client)
             return
 
         logger.warning("[%s] Comando non riconosciuto: %s", self.id, suffix)
+
+    def handle_set_geyser_settings(self, client: mqtt.Client, payload: str):
+        try:
+            data = json.loads(payload) if payload else {}
+            nozzles = int(data.get("nozzles"))
+            tube_length = str(data.get("tube_length", "")).strip()
+            nozzles_2_raw = data.get("nozzles_2", None)
+            tube_length_2_raw = data.get("tube_length_2", None)
+            nozzles_2 = int(nozzles_2_raw) if nozzles_2_raw not in (None, "") else None
+            tube_length_2 = str(tube_length_2_raw).strip() if tube_length_2_raw not in (None, "") else None
+            buzzer_off = bool(data.get("buzzer_off", False))
+
+            if not (20 <= nozzles <= 60):
+                logger.error("[%s] nozzles zona 1 fuori range 20-60: %s", self.id, nozzles); return
+            if nozzles_2 is not None and not (20 <= nozzles_2 <= 60):
+                logger.error("[%s] nozzles zona 2 fuori range 20-60: %s", self.id, nozzles_2); return
+            if not tube_length:
+                logger.error("[%s] tube_length zona 1 vuoto", self.id); return
+
+            ok = self.api.set_geyser_settings(nozzles, tube_length, nozzles_2, tube_length_2, buzzer_off)
+            if ok:
+                logger.info("[%s] Impostazioni zone aggiornate.", self.id)
+                self.publish_geyser_settings(client)
+                self.poll_once(client)
+            else:
+                logger.error("[%s] Set_Settings fallito.", self.id)
+        except Exception as e:
+            logger.error("[%s] handle_set_geyser_settings errore: %s", self.id, e)
+
+    def handle_set_tank(self, client: mqtt.Client, payload: str):
+        try:
+            data = json.loads(payload) if payload else {}
+            tank = int(data.get("tank"))
+            liquid = str(data.get("liquid", "")).strip()
+            dilution = str(data.get("dilution", "")).replace(",", ".").strip()
+            type_ = str(data.get("type", "")).strip()
+
+            if tank not in (1, 2):
+                logger.error("[%s] tank deve essere 1 o 2: %s", self.id, tank); return
+            if not liquid:
+                logger.error("[%s] liquid vuoto per tanica %d", self.id, tank); return
+            try:
+                dilution_f = float(dilution)
+                if dilution_f <= 0 or dilution_f > 100:
+                    logger.error("[%s] dilution fuori range 0-100: %s", self.id, dilution); return
+            except Exception:
+                logger.error("[%s] dilution non numerica: %s", self.id, dilution); return
+
+            ok = self.api.set_tank(tank, liquid, dilution, type_)
+            if ok:
+                logger.info("[%s] Tanica %d aggiornata.", self.id, tank)
+                info = self.api.get_tank(tank)
+                self.publish_tank_info(client, tank, info)
+                self.poll_once(client)
+                self.reload_strategies(client)
+            else:
+                logger.error("[%s] Set_Tank fallito per tanica %d.", self.id, tank)
+        except Exception as e:
+            logger.error("[%s] handle_set_tank errore: %s", self.id, e)
 
     def handle_quickstart(self, client: mqtt.Client, payload: str):
         status = self.api.get_status()
@@ -792,6 +947,7 @@ def main():
         if reload_counter >= reload_every:
             reload_counter = 0
             for worker in WORKERS:
+                worker.publish_device_settings(client)
                 worker.reload_strategies(client)
 
         restart_counter += 1

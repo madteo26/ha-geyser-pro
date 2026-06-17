@@ -1,6 +1,6 @@
 # Geyser PRO - Home Assistant Add-on
 
-![Version](https://img.shields.io/badge/version-0.8.3-green.svg)
+![Version](https://img.shields.io/badge/version-0.8.5-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
 Home Assistant add-on for the **Stocker Geyser PRO** mosquito repellent system.
@@ -16,6 +16,7 @@ Home Assistant add-on for the **Stocker Geyser PRO** mosquito repellent system.
 * Quick Start: trigger instant nebulization on the selected device
 * Custom dashboard: dark-mode HTML panel with device selector, zone filtering and cycle status
 * Auto token injection: `dashboard_token` written automatically to `/config/www/geyser_token.js`
+* Webapp settings import: edit zone nozzles/tube length and tank liquid/dilution/type from the dashboard
 
 ## Entity naming
 
@@ -31,6 +32,13 @@ With device id `casa`:
 | `sensor.geyser_pro_casa_prossimo_trattamento` | Next treatment time |
 | `sensor.geyser_pro_casa_zona_1_nome` | Zone 1 friendly name |
 | `sensor.geyser_pro_casa_zona_2_nome` | Zone 2 friendly name |
+| `sensor.geyser_pro_casa_zona_1_ugelli` | Zone 1 nozzle count from Stocker settings |
+| `sensor.geyser_pro_casa_zona_1_tubo_m` | Zone 1 installed tube length |
+| `sensor.geyser_pro_casa_zona_2_ugelli` | Zone 2 nozzle count from Stocker settings |
+| `sensor.geyser_pro_casa_zona_2_tubo_m` | Zone 2 installed tube length |
+| `binary_sensor.geyser_pro_casa_buzzer_off` | Acoustic signal disabled |
+| `sensor.geyser_pro_casa_tanica_1_nome/diluizione/tipo` | Tank 1 settings |
+| `sensor.geyser_pro_casa_tanica_2_nome/diluizione/tipo` | Tank 2 settings |
 | `binary_sensor.geyser_pro_casa_alert` | Active alarm |
 | `binary_sensor.geyser_pro_casa_quickstart_disponibile` | Quick Start available |
 | `binary_sensor.geyser_pro_casa_quickstart_attivo` | Quick Start active |
@@ -45,6 +53,8 @@ geyser_pro/casa/quickstart/cmd
 geyser_pro/casa/cmd/reload
 geyser_pro/casa/cmd/create_strategy
 geyser_pro/casa/cmd/create_cycle
+geyser_pro/casa/cmd/set_geyser_settings
+geyser_pro/casa/cmd/set_tank
 ```
 
 ## Configuration
@@ -96,6 +106,29 @@ zone_2_name: "Siepe"
 
 For 0.8.x, using `devices:` is strongly recommended. Yes, even if humans enjoy migrating things twice.
 
+## Webapp settings
+
+The dashboard Settings tab imports two Stocker webapp functions:
+
+1. **Zone settings** via `Set_Settings`
+   - zone 1 nozzles
+   - zone 1 tube length
+   - zone 2 nozzles
+   - zone 2 tube length
+   - acoustic signal / buzzer state
+
+2. **Tank settings** via `Set_Tank`
+   - tank liquid name
+   - dilution percentage
+   - liquid type
+
+Commands are routed through the selected device namespace, for example:
+
+```text
+geyser_pro/casa/cmd/set_geyser_settings
+geyser_pro/casa/cmd/set_tank
+```
+
 ## Dashboard
 
 Copy `geyser_dashboard.html` to `/config/www/geyser_dashboard.html`.
@@ -128,6 +161,10 @@ Copy both files into `/config/www/`:
 ```
 
 This avoids stale browser cache on desktop and iOS/Companion App after dashboard updates.
+
+### 0.8.5 dashboard note
+
+Fixes the Settings tab visibility: `page-settings` is now a sibling of `page-dashboard`, not nested inside it. This matters because browsers, with admirable cruelty, hide children of hidden tabs too.
 
 ## License
 

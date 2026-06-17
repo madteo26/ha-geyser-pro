@@ -337,6 +337,95 @@
   .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
   .btn-cancel { flex: 1; background: var(--surface2); border: 1px solid var(--border2); color: var(--muted); border-radius: 8px; padding: 10px; cursor: pointer; font-family: inherit; }
   .btn-confirm { flex: 2; background: var(--green); border: none; color: #0f1117; border-radius: 8px; padding: 10px; cursor: pointer; font-weight: 500; font-family: inherit; }
+
+  .main-nav {
+    display: flex;
+    gap: 8px;
+    margin: 0 0 14px;
+  }
+  .main-nav button, .device-selector button {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    color: var(--muted);
+    border-radius: 10px;
+    padding: 9px 16px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    transition: all 0.2s;
+  }
+  .main-nav button.active, .device-selector button.active {
+    background: var(--green-dim);
+    border-color: var(--green);
+    color: var(--green);
+  }
+  .page { display: none; }
+  .page.active { display: block; }
+  .settings-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .settings-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+  .settings-row {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .settings-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .settings-field label {
+    font-size: 11px;
+    color: var(--muted);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .settings-field input {
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 9px 12px;
+    font-size: 13px;
+    font-family: 'DM Sans', sans-serif;
+    width: 100%;
+  }
+  .settings-field input:focus { outline: none; border-color: var(--green); }
+  .settings-help {
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.35;
+    margin: -2px 0 12px;
+  }
+  .settings-feedback {
+    font-size: 12px;
+    color: var(--muted);
+    min-height: 16px;
+    margin-top: 8px;
+    text-align: center;
+  }
+  .settings-switch-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 0;
+  }
+  @media (max-width: 900px) {
+    .settings-grid, .settings-row { grid-template-columns: 1fr; }
+  }
+
 </style>
 </head>
 <body>
@@ -372,6 +461,13 @@
 </div>
 
 <div id="instance-selector" class="device-selector" style="display:none;"></div>
+
+<div class="main-nav">
+  <button id="nav-dashboard" class="active" onclick="switchPage('dashboard')">Dashboard</button>
+  <button id="nav-settings" onclick="switchPage('settings')">Settings</button>
+</div>
+
+<div id="page-dashboard" class="page active">
 
 <div class="grid4">
   <div class="card">
@@ -451,8 +547,104 @@
       <div id="qs-feedback" style="font-size:12px; color:var(--muted); text-align:center; min-height:16px;"></div>
     </div>
   </div>
+
 </div>
 
+</div><!-- /page-dashboard -->
+
+<div id="page-settings" class="page">
+  <div class="settings-grid">
+    <div class="settings-card">
+      <div class="section-title">Impostazioni zone</div>
+      <div class="settings-help">
+        Valori importati dalla webapp Stocker: quantità ugelli e metri tubo per zona. Questi numeri influenzano la nebulizzazione, quindi non inventarli come fa certa gente coi preventivi.
+      </div>
+
+      <div style="font-weight:700; margin:8px 0 10px;" id="settings-zone1-title">Zona 1</div>
+      <div class="settings-row">
+        <div class="settings-field">
+          <label>Ugelli zona 1</label>
+          <input type="number" id="set-z1-nozzles" min="20" max="60" step="1">
+        </div>
+        <div class="settings-field">
+          <label>Metri tubo zona 1</label>
+          <input type="number" id="set-z1-tube" min="0" step="1">
+        </div>
+      </div>
+
+      <div style="font-weight:700; margin:14px 0 10px;" id="settings-zone2-title">Zona 2</div>
+      <div class="settings-row">
+        <div class="settings-field">
+          <label>Ugelli zona 2</label>
+          <input type="number" id="set-z2-nozzles" min="20" max="60" step="1">
+        </div>
+        <div class="settings-field">
+          <label>Metri tubo zona 2</label>
+          <input type="number" id="set-z2-tube" min="0" step="1">
+        </div>
+      </div>
+
+      <div class="settings-switch-row">
+        <div>
+          <div style="font-weight:600;">Buzzer disattivato</div>
+          <div class="settings-help" style="margin:2px 0 0;">ON = segnale acustico spento.</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="set-buzzer-off">
+          <span class="tog-slider"></span>
+        </label>
+      </div>
+
+      <button class="btn-launch" onclick="saveGeyserSettingsFromDashboard()">💾 Salva impostazioni zone</button>
+      <div class="settings-feedback" id="settings-zone-feedback"></div>
+    </div>
+
+    <div class="settings-card">
+      <div class="section-title">Taniche / liquidi</div>
+      <div class="settings-help">
+        Modifica nome liquido, percentuale di diluizione e tipo liquido come nella webapp Stocker.
+      </div>
+
+      <div style="font-weight:700; margin:8px 0 10px;">Tanica 1</div>
+      <div class="settings-row">
+        <div class="settings-field">
+          <label>Nome liquido</label>
+          <input type="text" id="set-tank1-liquid" placeholder="ETOKRAFT">
+        </div>
+        <div class="settings-field">
+          <label>Diluizione %</label>
+          <input type="number" id="set-tank1-dilution" min="0.1" max="100" step="0.1">
+        </div>
+      </div>
+      <div class="settings-field" style="margin-bottom:12px;">
+        <label>Tipo liquido</label>
+        <input type="text" id="set-tank1-type" placeholder="Abbattente">
+      </div>
+      <button class="btn-launch" onclick="saveTankSettingsFromDashboard(1)">💾 Salva tanica 1</button>
+      <div class="settings-feedback" id="settings-tank1-feedback"></div>
+
+      <div style="height:1px;background:var(--border);margin:18px 0;"></div>
+
+      <div style="font-weight:700; margin:8px 0 10px;">Tanica 2</div>
+      <div class="settings-row">
+        <div class="settings-field">
+          <label>Nome liquido</label>
+          <input type="text" id="set-tank2-liquid" placeholder="NEBUZAN">
+        </div>
+        <div class="settings-field">
+          <label>Diluizione %</label>
+          <input type="number" id="set-tank2-dilution" min="0.1" max="100" step="0.1">
+        </div>
+      </div>
+      <div class="settings-field" style="margin-bottom:12px;">
+        <label>Tipo liquido</label>
+        <input type="text" id="set-tank2-type" placeholder="Repellente">
+      </div>
+      <button class="btn-launch" onclick="saveTankSettingsFromDashboard(2)">💾 Salva tanica 2</button>
+      <div class="settings-feedback" id="settings-tank2-feedback"></div>
+    </div>
+  </div>
+</div>
 
 
 <script>
@@ -502,6 +694,40 @@ function barColor(v) {
 function var_(n) {
   return getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 }
+
+
+function switchPage(page) {
+  const dash = document.getElementById('page-dashboard');
+  const sett = document.getElementById('page-settings');
+  const nd = document.getElementById('nav-dashboard');
+  const ns = document.getElementById('nav-settings');
+  if (dash) dash.classList.toggle('active', page === 'dashboard');
+  if (sett) sett.classList.toggle('active', page === 'settings');
+  if (nd) nd.classList.toggle('active', page === 'dashboard');
+  if (ns) ns.classList.toggle('active', page === 'settings');
+}
+
+function setInputValue(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const v = value === null || value === undefined || value === 'unknown' || value === 'unavailable' ? '' : String(value);
+  if (document.activeElement !== el) el.value = v;
+}
+
+function setCheckboxValue(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const on = value === 'on' || value === 'ON' || value === true || value === 'true';
+  if (document.activeElement !== el) el.checked = on;
+}
+
+function splitLiquidLabel(v) {
+  const s = String(v || '').trim();
+  const m = s.match(/^(.+?)\s*\((.*?)\s+([\d.,]+)%\)$/);
+  if (m) return { liquid: m[1].trim(), type: m[2].trim(), dilution: m[3].replace(',', '.') };
+  return { liquid: s.split('(')[0].trim(), type: '', dilution: '' };
+}
+
 
 function setBar(id, pct) {
   const el = document.getElementById(id);
@@ -772,6 +998,7 @@ function updateUI(states) {
   const z1Name = getStateVal(states, [`sensor.${ENTITY_PRE}_zona_1_nome`], 'Zona 1 Nome', 'sensor');
   const z2Name = getStateVal(states, [`sensor.${ENTITY_PRE}_zona_2_nome`], 'Zona 2 Nome', 'sensor');
   applyZoneLabels(z1Name, z2Name);
+  updateSettingsUI(states, z1Name, z2Name);
 
   const stato = getStateVal(states, [`sensor.${ENTITY_PRE}_stato`], 'Stato', 'sensor') || '—';
   document.getElementById('stato-text').textContent = stato;
@@ -855,6 +1082,95 @@ function updateUI(states) {
   buildStrategies(states);
   buildCycles(states);
 }
+
+
+function updateSettingsUI(states, z1Name, z2Name) {
+  const z1 = validName(z1Name) || 'Zona 1';
+  const z2 = validName(z2Name) || 'Zona 2';
+  const z1Title = document.getElementById('settings-zone1-title');
+  const z2Title = document.getElementById('settings-zone2-title');
+  if (z1Title) z1Title.textContent = 'Zona 1 — ' + z1;
+  if (z2Title) z2Title.textContent = 'Zona 2 — ' + z2;
+
+  setInputValue('set-z1-nozzles', getStateVal(states, [`sensor.${ENTITY_PRE}_zona_1_ugelli`], 'Zona 1 Ugelli', 'sensor'));
+  setInputValue('set-z1-tube', getStateVal(states, [`sensor.${ENTITY_PRE}_zona_1_tubo_m`], 'Zona 1 Tubo', 'sensor'));
+  setInputValue('set-z2-nozzles', getStateVal(states, [`sensor.${ENTITY_PRE}_zona_2_ugelli`], 'Zona 2 Ugelli', 'sensor'));
+  setInputValue('set-z2-tube', getStateVal(states, [`sensor.${ENTITY_PRE}_zona_2_tubo_m`], 'Zona 2 Tubo', 'sensor'));
+  setCheckboxValue('set-buzzer-off', getStateVal(states, [`binary_sensor.${ENTITY_PRE}_buzzer_off`], 'Buzzer Off', 'binary_sensor'));
+
+  for (const tank of [1, 2]) {
+    let liquid = getStateVal(states, [`sensor.${ENTITY_PRE}_tanica_${tank}_nome`], `Tanica ${tank} Nome`, 'sensor');
+    let dilution = getStateVal(states, [`sensor.${ENTITY_PRE}_tanica_${tank}_diluizione`], `Tanica ${tank} Diluizione`, 'sensor');
+    let type = getStateVal(states, [`sensor.${ENTITY_PRE}_tanica_${tank}_tipo`], `Tanica ${tank} Tipo`, 'sensor');
+
+    if (!validName(liquid)) {
+      const label = getStateVal(states, [
+        `sensor.${ENTITY_PRE}_liquido_${tank}`,
+        `sensor.${ENTITY_PRE}_liquido_serbatoio_${tank}`
+      ], `Liquido Serbatoio ${tank}`, 'sensor');
+      const parsed = splitLiquidLabel(label);
+      liquid = parsed.liquid;
+      if (!validName(dilution)) dilution = parsed.dilution;
+      if (!validName(type)) type = parsed.type;
+    }
+
+    setInputValue(`set-tank${tank}-liquid`, liquid || '');
+    setInputValue(`set-tank${tank}-dilution`, dilution || '');
+    setInputValue(`set-tank${tank}-type`, type || '');
+  }
+}
+
+function readNumber(id, label, min=null, max=null) {
+  const el = document.getElementById(id);
+  const raw = (el ? el.value : '').trim().replace(',', '.');
+  if (raw === '') throw new Error(label + ' mancante');
+  const n = Number(raw);
+  if (!Number.isFinite(n)) throw new Error(label + ' non valido');
+  if (min !== null && n < min) throw new Error(label + ' minimo ' + min);
+  if (max !== null && n > max) throw new Error(label + ' massimo ' + max);
+  return n;
+}
+
+async function saveGeyserSettingsFromDashboard() {
+  const fb = document.getElementById('settings-zone-feedback');
+  try {
+    const payload = {
+      nozzles: Math.round(readNumber('set-z1-nozzles', 'Ugelli zona 1', 20, 60)),
+      tube_length: String(readNumber('set-z1-tube', 'Tubo zona 1', 0, null)),
+      nozzles_2: Math.round(readNumber('set-z2-nozzles', 'Ugelli zona 2', 20, 60)),
+      tube_length_2: String(readNumber('set-z2-tube', 'Tubo zona 2', 0, null)),
+      buzzer_off: !!document.getElementById('set-buzzer-off')?.checked
+    };
+    if (fb) fb.textContent = 'Invio impostazioni...';
+    await mqttPublish(`${TOPIC_PRE}/cmd/set_geyser_settings`, payload);
+    if (fb) fb.textContent = 'Impostazioni inviate ✓';
+    setTimeout(refreshStates, 2500);
+    setTimeout(refreshStates, 6000);
+  } catch (e) {
+    if (fb) fb.textContent = 'Errore: ' + e.message;
+  }
+}
+
+async function saveTankSettingsFromDashboard(tank) {
+  const fb = document.getElementById(`settings-tank${tank}-feedback`);
+  try {
+    const liquid = document.getElementById(`set-tank${tank}-liquid`)?.value.trim();
+    const dilution = String(readNumber(`set-tank${tank}-dilution`, `Diluizione tanica ${tank}`, 0.1, 100));
+    const type = document.getElementById(`set-tank${tank}-type`)?.value.trim();
+
+    if (!liquid) throw new Error('Nome liquido tanica ' + tank + ' mancante');
+    if (!type) throw new Error('Tipo liquido tanica ' + tank + ' mancante');
+
+    if (fb) fb.textContent = 'Invio tanica ' + tank + '...';
+    await mqttPublish(`${TOPIC_PRE}/cmd/set_tank`, { tank, liquid, dilution, type });
+    if (fb) fb.textContent = 'Tanica ' + tank + ' inviata ✓';
+    setTimeout(refreshStates, 2500);
+    setTimeout(refreshStates, 6000);
+  } catch (e) {
+    if (fb) fb.textContent = 'Errore: ' + e.message;
+  }
+}
+
 
 function buildStrategies(states) {
   const list = document.getElementById('strategies-list');
