@@ -80,6 +80,31 @@
     50% { opacity: 0.3; }
   }
 
+
+  .device-selector {
+    display: flex;
+    gap: 8px;
+    margin: 0 0 16px 0;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .device-tab {
+    background: var(--surface);
+    color: var(--muted);
+    border: 1px solid var(--border2);
+    border-radius: 10px;
+    padding: 8px 14px;
+    cursor: pointer;
+    font-size: 13px;
+    font-family: inherit;
+    transition: all 0.2s;
+  }
+  .device-tab.active {
+    background: var(--green-dim);
+    color: var(--green);
+    border-color: var(--green);
+  }
+
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
   .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px; }
   .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
@@ -343,6 +368,8 @@
   ⚠ Allarme attivo
 </div>
 
+<div id="instance-selector" class="device-selector" style="display:none;"></div>
+
 <div class="grid4">
   <div class="card">
     <div class="card-label">Batteria</div>
@@ -434,10 +461,10 @@ let TOKEN = document.querySelector('meta[name="ha-access-token"]')?.content || (
 let haStates   = {};
 let wsConn     = null;
 let wsId       = 1;
-// Istanza attiva — auto-rilevata dalle entità HA
-let INSTANCE_ID  = 'single';
-let ENTITY_PRE   = 'geyser_pro';
-let TOPIC_PRE    = 'geyser_pro';
+// Device attivo — autodetect da GEYSER_DEVICES oppure dagli stati HA.
+let INSTANCE_ID  = '';
+let ENTITY_PRE   = '';
+let TOPIC_PRE    = '';
 let _instanceMap = {};
 
 document.getElementById('qs-dur').oninput = function() {
@@ -594,48 +621,82 @@ function escapeHtml(v) {
 
 let _lastStates = [];
 function detectInstances(states) {
-  const instances = [];
+  const map = {};
 
-  // Formato attuale addon: sensor.geyser_pro_stato
-  if (states.some(s => s.entity_id === 'sensor.geyser_pro_stato')) {
-    instances.push('single');
-  }
-
-  // Eventuale formato multi-istanza futuro: sensor.geyser_pro_NOME_stato
-  const re = /^sensor\.geyser_pro_(.+)_stato$/;
-  states.forEach(s => {
-    const m = s.entity_id.match(re);
-    if (m && !instances.includes(m[1])) instances.push(m[1]);
+  // Fonte migliore: scritta dall'addon in /local/geyser_token.js
+  const configured = (typeof GEYSER_DEVICES !== 'undefined' && Array.isArray(GEYSER_DEVICES)) ? GEYSER_DEVICES : [];
+  const hasConfigured = configured.length > 0;
+  configured.forEach(d => {
+    if (!d || !d.id) return;
+    map[d.id] = {
+      id: d.id,
+      name: d.name || d.id,
+      entityPre: d.entity_prefix || ('geyser_pro_' + d.id),
+      topicPre: d.topic_base || ('geyser_pro/' + d.id),
+    };
   });
 
-  if (instances.length === 0) instances.push('single');
-  return instances;
+  // Autodetect da HA solo se l'addon non ha scritto GEYSER_DEVICES.
+  // Se GEYSER_DEVICES esiste, è la fonte unica della dashboard: così ignoriamo vecchie entità retained 0.7.x
+  // tipo sensor.geyser_pro_stato, che altrimenti creano il famoso terzo device zombie. Che poesia.
+  if (!hasConfigured) {
+    const re = /^sensor\.geyser_pro_(.+)_stato$/;
+    states.forEach(s => {
+      const m = s.entity_id.match(re);
+      if (!m) return;
+      const id = m[1];
+      if (!map[id]) {
+        map[id] = {
+          id,
+          name: s.attributes?.device_name || s.attributes?.friendly_name?.replace(/\s*Stato$/i, '') || id,
+          entityPre: 'geyser_pro_' + id,
+          topicPre: 'geyser_pro/' + id,
+        };
+      }
+    });
+
+    // Fallback legacy 0.7.x: sensor.geyser_pro_stato
+    if (states.some(s => s.entity_id === 'sensor.geyser_pro_stato') && !map.single) {
+      const st = states.find(s => s.entity_id === 'sensor.geyser_pro_stato');
+      map.single = {
+        id: 'single',
+        name: st?.attributes?.device_name || (typeof GEYSER_DEVICE_NAME !== 'undefined' ? GEYSER_DEVICE_NAME : 'Geyser PRO'),
+        entityPre: 'geyser_pro',
+        topicPre: 'geyser_pro',
+      };
+    }
+  }
+
+  _instanceMap = map;
+  const ids = Object.keys(map);
+  if (ids.length === 0) {
+    map.single = { id: 'single', name: 'Geyser PRO', entityPre: 'geyser_pro', topicPre: 'geyser_pro' };
+    return ['single'];
+  }
+  return ids;
 }
 
 function instanceLabel(id) {
-  return id === 'single' ? '' : id.charAt(0).toUpperCase() + id.slice(1);
+  const d = _instanceMap[id];
+  if (d && d.name) return d.name;
+  return id === 'single' ? 'Geyser PRO' : id.charAt(0).toUpperCase() + id.slice(1);
 }
 
 function updateInstanceSelector(instances) {
   let sel = document.getElementById('instance-selector');
   if (!sel) return;
-  // Mostra solo se ci sono più istanze
   sel.style.display = instances.length > 1 ? 'flex' : 'none';
   sel.innerHTML = '';
   instances.forEach(id => {
     const btn = document.createElement('button');
-    btn.className = 'zone-btn' + (id === INSTANCE_ID ? ' active' : '');
-    btn.textContent = instanceLabel(id) || 'Geyser PRO';
+    btn.className = 'device-tab' + (id === INSTANCE_ID ? ' active' : '');
+    btn.textContent = instanceLabel(id);
     btn.onclick = () => {
       INSTANCE_ID = id;
-      if (INSTANCE_ID === 'single') {
-        ENTITY_PRE = 'geyser_pro';
-        TOPIC_PRE  = 'geyser_pro';
-      } else {
-        ENTITY_PRE = 'geyser_pro_' + INSTANCE_ID;
-        TOPIC_PRE  = 'geyser_pro_' + INSTANCE_ID;
-      }
-      sel.querySelectorAll('.zone-btn').forEach(b => b.classList.remove('active'));
+      const d = _instanceMap[INSTANCE_ID] || {};
+      ENTITY_PRE = d.entityPre || (id === 'single' ? 'geyser_pro' : 'geyser_pro_' + id);
+      TOPIC_PRE  = d.topicPre  || (id === 'single' ? 'geyser_pro' : 'geyser_pro/' + id);
+      sel.querySelectorAll('.device-tab').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       if (_lastStates) updateUI(_lastStates);
     };
@@ -647,26 +708,17 @@ function updateUI(states) {
   haStates = states;
   _lastStates = states;
 
-  // Auto-detect istanze disponibili
+  // Auto-detect device disponibili
   const instances = detectInstances(states);
-  // Prima volta: auto-seleziona la prima istanza trovata
-  if (!instances.includes(INSTANCE_ID) && instances.length > 0) {
+  if (!INSTANCE_ID || !instances.includes(INSTANCE_ID)) {
     INSTANCE_ID = instances[0];
   }
-  // Aggiorna ENTITY_PRE e TOPIC_PRE dalla mappa
-  if (INSTANCE_ID === 'single') {
-    ENTITY_PRE = 'geyser_pro';
-    TOPIC_PRE  = 'geyser_pro';
-  } else if (_instanceMap[INSTANCE_ID]) {
-    ENTITY_PRE = _instanceMap[INSTANCE_ID].entityPre;
-    TOPIC_PRE  = _instanceMap[INSTANCE_ID].topicPre;
-  } else {
-    ENTITY_PRE = 'geyser_pro_' + INSTANCE_ID;
-    TOPIC_PRE  = 'geyser_pro_' + INSTANCE_ID;
-  }
+  const activeDevice = _instanceMap[INSTANCE_ID] || {};
+  ENTITY_PRE = activeDevice.entityPre || (INSTANCE_ID === 'single' ? 'geyser_pro' : 'geyser_pro_' + INSTANCE_ID);
+  TOPIC_PRE  = activeDevice.topicPre  || (INSTANCE_ID === 'single' ? 'geyser_pro' : 'geyser_pro/' + INSTANCE_ID);
   updateInstanceSelector(instances);
 
-  const configuredDeviceName = validName(typeof GEYSER_DEVICE_NAME !== 'undefined' ? GEYSER_DEVICE_NAME : '');
+  const configuredDeviceName = validName(activeDevice.name) || validName(typeof GEYSER_DEVICE_NAME !== 'undefined' ? GEYSER_DEVICE_NAME : '');
   const attrDeviceName = getAttrVal(states, [
     `sensor.${ENTITY_PRE}_stato`,
     `sensor.geyser_pro_stato`
@@ -688,7 +740,7 @@ function updateUI(states) {
   if (title) title.textContent = deviceName;
 
   const lbl = document.getElementById('instance-label');
-  if (lbl) lbl.textContent = 'Geyser PRO';
+  if (lbl) lbl.textContent = INSTANCE_ID === 'single' ? 'Geyser PRO' : `Geyser PRO · ${INSTANCE_ID}`;
 
   const get = (eid) => getStateVal(states, [eid]);
 
