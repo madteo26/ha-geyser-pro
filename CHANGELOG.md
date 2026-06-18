@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.6] - 2026-06-18
+### Fixed
+- Added a strategy reload safety guard: periodic reloads that return an empty strategy list while a previous non-empty cache exists are skipped, preventing Home Assistant from losing retained MQTT strategy/cycle entities.
+- `get_strategies()` now returns `None` when the Stocker strategy page looks like a login/error/malformed page instead of treating it as a valid empty strategy list.
+- Discovery cleanup no longer removes retained strategy/cycle topics on suspicious empty reloads.
+
 ## [0.8.5] - 2026-06-18
 ### Fixed
 - Dashboard Settings tab is now visible: `page-settings` is no longer nested inside `page-dashboard`, so switching to Settings does not hide the settings content together with the dashboard page.

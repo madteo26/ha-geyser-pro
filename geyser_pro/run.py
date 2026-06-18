@@ -1,5 +1,5 @@
 """
-Geyser PRO - Home Assistant Addon v0.8.5
+Geyser PRO - Home Assistant Addon v0.8.6
 MQTT bridge con autodiscovery per Stocker Geyser PRO.
 Multi-device ready: ogni device ha account Stocker, namespace MQTT, entity prefix,
 cache strategie e override locali separati.
@@ -41,7 +41,7 @@ POLL_INTERVAL = int(OPTIONS.get("poll_interval", 7))
 DASHBOARD_TOKEN = OPTIONS.get("dashboard_token", "")
 DISC_PREFIX = "homeassistant"
 TOPIC_ROOT = "geyser_pro"
-SW_VERSION = "0.8.5"
+SW_VERSION = "0.8.6"
 DEVICE_NAME_DEFAULT = "Geyser PRO"
 _OVERRIDE_TTL = 600  # 10 minuti
 
@@ -326,7 +326,18 @@ class GeyserDeviceWorker:
         attrs.update(extra)
         client.publish(self.state_topic("stato") + "_attr", json.dumps(attrs), retain=True)
 
-    def publish_strategy_discovery(self, client: mqtt.Client, strategies: list):
+    def publish_strategy_discovery(self, client: mqtt.Client, strategies: list, allow_empty_cleanup: bool = False):
+        # Safety guard: una lettura temporaneamente vuota dalla webapp non deve cancellare
+        # i retained MQTT di strategie/cicli già noti. Questo succede quando Stocker
+        # risponde con HTML valido ma senza markup strategie, perché naturalmente anche
+        # le API private hanno bisogno del loro momento teatrale.
+        if not strategies and self.published_obj_ids and not allow_empty_cleanup:
+            logger.warning(
+                "[%s] Discovery strategie vuoto con %d topic già pubblicati — skip cleanup retained.",
+                self.id, len(self.published_obj_ids),
+            )
+            return
+
         new_obj_ids = set()
         count = 0
         for s in strategies:
@@ -577,17 +588,42 @@ class GeyserDeviceWorker:
         if not self.strategies_cache:
             logger.warning("[%s] Nessuna strategia trovata.", self.id)
 
-    def reload_strategies(self, client: mqtt.Client):
+    def reload_strategies(self, client: mqtt.Client, allow_empty: bool = False):
         logger.info("[%s] Ricaricamento strategie...", self.id)
         new_strategies = self.api.get_strategies()
         if new_strategies is None:
             logger.warning("[%s] get_strategies() ha fallito (None) — skip reload per preservare entità.", self.id)
             return
+
+        old_strategy_count = len(self.strategies_cache or [])
+        old_cycle_count = sum(len(s.get("cycles", [])) for s in (self.strategies_cache or []))
+        new_strategy_count = len(new_strategies)
+        new_cycle_count = sum(len(s.get("cycles", [])) for s in new_strategies)
+
+        # Guard principale: se prima avevamo strategie e una lettura periodica torna vuota,
+        # è quasi certamente parsing/sessione Stocker ballerina. Non cancelliamo i retained MQTT,
+        # perché altrimenti HA rimuove switch e la dashboard resta con "Nessuna strategia".
+        if (not allow_empty) and old_strategy_count > 0 and new_strategy_count == 0:
+            logger.warning(
+                "[%s] Lettura strategie vuota ma cache precedente non vuota (%d strategie/%d cicli) — skip reload anti-cancellazione.",
+                self.id, old_strategy_count, old_cycle_count,
+            )
+            return
+
+        # Seconda cintura: se le strategie ci sono ma tutti i cicli spariscono mentre prima esistevano,
+        # meglio saltare. I cicli sono la parte più fragile del parsing HTML della webapp.
+        if (not allow_empty) and old_cycle_count > 0 and new_strategy_count > 0 and new_cycle_count == 0:
+            logger.warning(
+                "[%s] Lettura cicli vuota ma cache precedente aveva %d cicli — skip reload anti-cancellazione.",
+                self.id, old_cycle_count,
+            )
+            return
+
         self.enrich_strategies(new_strategies)
         self.strategies_cache = new_strategies
-        self.publish_strategy_discovery(client, new_strategies)
+        self.publish_strategy_discovery(client, new_strategies, allow_empty_cleanup=allow_empty)
         self.publish_strategy_states(client, new_strategies)
-        logger.info("[%s] Strategie ricaricate: %d", self.id, len(new_strategies))
+        logger.info("[%s] Strategie ricaricate: %d (%d cicli)", self.id, new_strategy_count, new_cycle_count)
         client.publish(f"{self.topic_base}/strategies/updated", "1", retain=False)
 
     def poll_once(self, client: mqtt.Client):
@@ -779,7 +815,7 @@ class GeyserDeviceWorker:
             ok = self.api.delete_strategy(sid)
             if ok:
                 logger.info("[%s] Strategia %d eliminata.", self.id, sid)
-                self.reload_strategies(client)
+                self.reload_strategies(client, allow_empty=True)
             else:
                 logger.error("[%s] Eliminazione strategia %d fallita.", self.id, sid)
         except Exception as e:
@@ -792,7 +828,7 @@ class GeyserDeviceWorker:
             ok = self.api.delete_cycle(cid)
             if ok:
                 logger.info("[%s] Ciclo %d eliminato.", self.id, cid)
-                self.reload_strategies(client)
+                self.reload_strategies(client, allow_empty=True)
             else:
                 logger.error("[%s] Eliminazione ciclo %d fallita.", self.id, cid)
         except Exception as e:

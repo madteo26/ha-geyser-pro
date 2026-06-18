@@ -1,6 +1,6 @@
 # Geyser PRO - Home Assistant Add-on
 
-![Version](https://img.shields.io/badge/version-0.8.5-green.svg)
+![Version](https://img.shields.io/badge/version-0.8.6-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
 Home Assistant add-on for the **Stocker Geyser PRO** mosquito repellent system.
@@ -128,6 +128,10 @@ Commands are routed through the selected device namespace, for example:
 geyser_pro/casa/cmd/set_geyser_settings
 geyser_pro/casa/cmd/set_tank
 ```
+
+### Strategy reload safety
+
+The add-on now guards periodic strategy reloads: if Stocker temporarily returns an empty or malformed strategy page while cached strategies already exist, the add-on skips the reload instead of deleting retained MQTT discovery topics. This prevents strategies/cycles from disappearing from Home Assistant until the next add-on restart.
 
 ## Dashboard
 

@@ -182,6 +182,18 @@ class GeyserAPI:
             resp.raise_for_status()
             html = resp.text
 
+            # Se Stocker ci rimanda al login o una pagina non contenente il markup strategie,
+            # non trattarla come "zero strategie": è un errore temporaneo di sessione/parsing.
+            # Se qui tornassimo [], il backend cancellerebbe i retained MQTT di strategie/cicli.
+            if "form-login-email" in html or "submit_login" in html:
+                logger.warning("Pagina strategie sembra login/non autenticata — ritorno None")
+                return None
+            if ("setstatusStrategy" not in html and
+                "strategy-output_valve" not in html and
+                "strategy-cycle" not in html):
+                logger.warning("Pagina strategie senza marker attesi (len=%d) — ritorno None", len(html))
+                return None
+
             # Determina la zona di ogni strategia cercando in quale tab appare
             zone_map = {}
             for valve in [1, 2]:
