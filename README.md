@@ -1,6 +1,6 @@
 # Geyser PRO - Home Assistant Add-on
 
-![Version](https://img.shields.io/badge/version-0.8.6-green.svg)
+![Version](https://img.shields.io/badge/version-0.8.7-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
 Home Assistant add-on for the **Stocker Geyser PRO** mosquito repellent system.
@@ -15,6 +15,7 @@ Home Assistant add-on for the **Stocker Geyser PRO** mosquito repellent system.
 * Multi-zone support: Zone 1 and Zone 2 with configurable friendly names per device
 * Quick Start: trigger instant nebulization on the selected device
 * Custom dashboard: dark-mode HTML panel with device selector, zone filtering and cycle status
+* Disabled strategy visual cue: cycles belonging to disabled strategies are grayed out in the dashboard
 * Auto token injection: `dashboard_token` written automatically to `/config/www/geyser_token.js`
 * Webapp settings import: edit zone nozzles/tube length and tank liquid/dilution/type from the dashboard
 

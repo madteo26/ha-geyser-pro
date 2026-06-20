@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.8.7] - 2026-06-18
+### Added
+- Dashboard now grays out cycle rows belonging to disabled parent strategies, making it easier to understand which configured cycles are currently inactive because the strategy toggle is OFF.
+- Disabled strategy groups in the cycle section now show a subtle disabled visual state while keeping cycle toggles visible.
+
 ## [0.8.6] - 2026-06-18
 ### Fixed
 - Added a strategy reload safety guard: periodic reloads that return an empty strategy list while a previous non-empty cache exists are skipped, preventing Home Assistant from losing retained MQTT strategy/cycle entities.

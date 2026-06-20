@@ -1,5 +1,5 @@
 """
-Geyser PRO - Home Assistant Addon v0.8.6
+Geyser PRO - Home Assistant Addon v0.8.7
 MQTT bridge con autodiscovery per Stocker Geyser PRO.
 Multi-device ready: ogni device ha account Stocker, namespace MQTT, entity prefix,
 cache strategie e override locali separati.
@@ -41,7 +41,7 @@ POLL_INTERVAL = int(OPTIONS.get("poll_interval", 7))
 DASHBOARD_TOKEN = OPTIONS.get("dashboard_token", "")
 DISC_PREFIX = "homeassistant"
 TOPIC_ROOT = "geyser_pro"
-SW_VERSION = "0.8.6"
+SW_VERSION = "0.8.7"
 DEVICE_NAME_DEFAULT = "Geyser PRO"
 _OVERRIDE_TTL = 600  # 10 minuti
 
