@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.10] - 2026-06-21
+### Fixed
+- Dashboard now renders strategies and cycles from the authoritative `strategy_index` sensor instead of inferring relationships from retained MQTT switch entities.
+- Removed the dangerous fallback that matched cycles to strategies by strategy name, which broke when Zone 1 and Zone 2 used the same strategy names.
+- Backend now scans retained MQTT discovery topics for existing strategy/cycle switches and removes orphaned retained config, state and attribute topics per device.
+- Added manual MQTT cleanup command: `geyser_pro/<device_id>/cmd/cleanup_orphans`.
+
 ## [0.8.7] - 2026-06-18
 ### Added
 - Dashboard now grays out cycle rows belonging to disabled parent strategies, making it easier to understand which configured cycles are currently inactive because the strategy toggle is OFF.

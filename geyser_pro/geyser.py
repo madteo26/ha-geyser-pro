@@ -83,6 +83,71 @@ class GeyserAPI:
             return self.login()
         return True
 
+    def _looks_like_login_page(self, html: str) -> bool:
+        text = html or ""
+        return (
+            "form-login-email" in text
+            or "submit_login" in text
+            or 'name="password"' in text and "index.php?login" in text
+        )
+
+    def _force_relogin(self, reason: str = "") -> bool:
+        logger.warning("Sessione HTML non valida%s — forzo re-login.", f" ({reason})" if reason else "")
+        try:
+            self.session = requests.Session()
+            self.token = None
+            return self.login()
+        except Exception as e:
+            logger.error("Re-login forzato fallito: %s", e)
+            return False
+
+    def _get_html_auth_retry(self, path: str, label: str, required_markers=None):
+        """
+        Scarica una pagina HTML della webapp.
+        Nota triste: le API JSON possono continuare a funzionare con il token,
+        mentre la sessione cookie usata dalle pagine HTML scade e rimanda al login.
+        Per strategie/settings serve quindi un re-login esplicito e retry.
+        """
+        if not self._ensure_auth():
+            logger.warning("%s: autenticazione non disponibile — ritorno None", label)
+            return None
+
+        required_markers = required_markers or []
+        url = f"{API_BASE}/{path.lstrip('/')}"
+
+        for attempt in range(2):
+            try:
+                resp = self.session.get(url, timeout=15)
+                resp.raise_for_status()
+                html = resp.text or ""
+
+                if self._looks_like_login_page(html):
+                    if attempt == 0:
+                        logger.warning("%s sembra login/non autenticata — re-login e retry.", label)
+                        if self._force_relogin(label):
+                            continue
+                    logger.warning("%s ancora login/non autenticata dopo retry — ritorno None", label)
+                    return None
+
+                if required_markers and not any(marker in html for marker in required_markers):
+                    if attempt == 0:
+                        logger.warning("%s senza marker attesi (len=%d) — re-login e retry.", label, len(html))
+                        if self._force_relogin(label):
+                            continue
+                    logger.warning("%s senza marker attesi anche dopo retry (len=%d) — ritorno None", label, len(html))
+                    return None
+
+                return html
+            except Exception as e:
+                if attempt == 0:
+                    logger.warning("%s fetch fallito (%s) — re-login e retry.", label, e)
+                    if self._force_relogin(label):
+                        continue
+                logger.error("%s fetch fallito dopo retry: %s", label, e)
+                return None
+
+        return None
+
     def _call(self, endpoint: str, data: dict, retries: int = 2):
         payload = {"data": data}
         if self.token:
@@ -175,23 +240,13 @@ class GeyserAPI:
         Ritorna lista di dict con:
           { id, name, active, output_valve, cycles: [{id, active, label}] }
         """
-        if not self._ensure_auth():
-            return []
         try:
-            resp = self.session.get(f"{API_BASE}/index.php?id=2001", timeout=15)
-            resp.raise_for_status()
-            html = resp.text
-
-            # Se Stocker ci rimanda al login o una pagina non contenente il markup strategie,
-            # non trattarla come "zero strategie": è un errore temporaneo di sessione/parsing.
-            # Se qui tornassimo [], il backend cancellerebbe i retained MQTT di strategie/cicli.
-            if "form-login-email" in html or "submit_login" in html:
-                logger.warning("Pagina strategie sembra login/non autenticata — ritorno None")
-                return None
-            if ("setstatusStrategy" not in html and
-                "strategy-output_valve" not in html and
-                "strategy-cycle" not in html):
-                logger.warning("Pagina strategie senza marker attesi (len=%d) — ritorno None", len(html))
+            html = self._get_html_auth_retry(
+                "index.php?id=2001",
+                "Pagina strategie",
+                required_markers=["setstatusStrategy", "strategy-output_valve", "strategy-cycle"],
+            )
+            if html is None:
                 return None
 
             # Determina la zona di ogni strategia cercando in quale tab appare
@@ -328,12 +383,14 @@ class GeyserAPI:
         La webapp non usa un endpoint Get_Settings: i valori sono renderizzati
         direttamente nell'HTML di index.php?id=4004. Sì, meraviglioso.
         """
-        if not self._ensure_auth():
-            return None
         try:
-            resp = self.session.get(f"{API_BASE}/index.php?id=4004", timeout=15)
-            resp.raise_for_status()
-            html = resp.text
+            html = self._get_html_auth_retry(
+                "index.php?id=4004",
+                "Pagina impostazioni",
+                required_markers=["form-geyser-nozzles", "form-geyser-tube_length", "form-geyser-buzzer_off"],
+            )
+            if html is None:
+                return None
 
             def _input_value(field_id, default=None):
                 m = re.search(

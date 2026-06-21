@@ -1,5 +1,5 @@
 """
-Geyser PRO - Home Assistant Addon v0.8.7
+Geyser PRO - Home Assistant Addon v0.8.10
 MQTT bridge con autodiscovery per Stocker Geyser PRO.
 Multi-device ready: ogni device ha account Stocker, namespace MQTT, entity prefix,
 cache strategie e override locali separati.
@@ -41,7 +41,7 @@ POLL_INTERVAL = int(OPTIONS.get("poll_interval", 7))
 DASHBOARD_TOKEN = OPTIONS.get("dashboard_token", "")
 DISC_PREFIX = "homeassistant"
 TOPIC_ROOT = "geyser_pro"
-SW_VERSION = "0.8.7"
+SW_VERSION = "0.8.10"
 DEVICE_NAME_DEFAULT = "Geyser PRO"
 _OVERRIDE_TTL = 600  # 10 minuti
 
@@ -291,6 +291,11 @@ class GeyserDeviceWorker:
                 "name": "Tanica 2 Tipo", "state_topic": self.state_topic("tanica_2_tipo"),
                 "icon": "mdi:tag-outline",
             }),
+            ("sensor", "strategy_index", {
+                "name": "Strategy Index", "state_topic": self.state_topic("strategy_index"),
+                "json_attributes_topic": self.state_topic("strategy_index") + "_attr",
+                "icon": "mdi:format-list-bulleted",
+            }),
             ("button", "quickstart_cmd", {
                 "name": "Quick Start", "command_topic": self.cmd_topic("quickstart"),
                 "icon": "mdi:play-circle-outline",
@@ -325,6 +330,110 @@ class GeyserDeviceWorker:
         }
         attrs.update(extra)
         client.publish(self.state_topic("stato") + "_attr", json.dumps(attrs), retain=True)
+
+    def publish_strategy_index(self, client: mqtt.Client, strategies: list):
+        """Pubblica l'indice autoritativo delle strategie/cicli correnti.
+        La dashboard usa questo indice per ignorare eventuali switch MQTT retained/orfani,
+        che altrimenti rimangono in Home Assistant come fossili molto collaborativi.
+        """
+        strategies = strategies or []
+        strategy_items = []
+        strategy_ids = []
+        cycle_ids = []
+        for s in strategies:
+            sid = int(s.get("id"))
+            cycles = []
+            for c in s.get("cycles", []):
+                cid = int(c.get("id"))
+                cycle_ids.append(cid)
+                cycles.append({
+                    "id": cid,
+                    "label": c.get("label", f"Ciclo {cid}"),
+                    "active": bool(c.get("active", True)),
+                })
+            strategy_ids.append(sid)
+            strategy_items.append({
+                "id": sid,
+                "name": s.get("name", f"Strategia {sid}"),
+                "active": bool(s.get("active", True)),
+                "output_valve": int(s.get("output_valve", 1) or 1),
+                "cycles": cycles,
+            })
+
+        attrs = {
+            "device_id": self.id,
+            "device_name": self.name,
+            "updated_at": int(time.time()),
+            "strategy_ids": strategy_ids,
+            "cycle_ids": cycle_ids,
+            "strategies": strategy_items,
+        }
+        client.publish(self.state_topic("strategy_index"), f"{len(strategy_ids)} strategie / {len(cycle_ids)} cicli", retain=True)
+        client.publish(self.state_topic("strategy_index") + "_attr", json.dumps(attrs), retain=True)
+
+    def scan_retained_strategy_switches(self, client: mqtt.Client, wait_s: float = 1.0) -> set:
+        """Legge i discovery retained già presenti nel broker per questo device.
+
+        Serve perché /data/published_ids_<device>.json può non conoscere vecchi topic
+        rimasti da versioni precedenti o da reload mal riusciti. Se non li scansioni,
+        Home Assistant continua a vedere cicli zombie, perché chiaramente i retained MQTT
+        non muoiono mai da soli.
+        """
+        found = set()
+        topic_filter = f"{DISC_PREFIX}/switch/{self.device_uid}/+/config"
+
+        def _on_retained(c, userdata, msg):
+            try:
+                if not msg.retain or not msg.payload:
+                    return
+                parts = msg.topic.split("/")
+                if len(parts) >= 5:
+                    obj_id = parts[-2]
+                    if obj_id.startswith("strategia_") or obj_id.startswith("ciclo_"):
+                        found.add(obj_id)
+            except Exception as e:
+                logger.debug("[%s] scan retained callback errore: %s", self.id, e)
+
+        try:
+            client.message_callback_add(topic_filter, _on_retained)
+            client.subscribe(topic_filter)
+            time.sleep(wait_s)
+            client.unsubscribe(topic_filter)
+            client.message_callback_remove(topic_filter)
+        except Exception as e:
+            logger.warning("[%s] Scan discovery retained fallita: %s", self.id, e)
+
+        if found:
+            logger.info("[%s] Discovery retained trovati nel broker: %d", self.id, len(found))
+        return found
+
+    def _remove_switch_retained(self, client: mqtt.Client, obj_id: str):
+        client.publish(self.disc_topic("switch", obj_id), "", retain=True)
+        client.publish(self.state_topic(obj_id), "", retain=True)
+        client.publish(self.state_topic(obj_id) + "_attr", "", retain=True)
+        logger.info("[%s] Topic switch orfano rimosso: %s", self.id, obj_id)
+
+    def valid_strategy_obj_ids(self, strategies: list) -> set:
+        valid = set()
+        for s in strategies or []:
+            valid.add(f"strategia_{s['id']}")
+            for c in s.get("cycles", []):
+                valid.add(f"ciclo_{c['id']}")
+        return valid
+
+    def cleanup_orphan_switches(self, client: mqtt.Client, valid_obj_ids: Optional[set] = None, scan: bool = True):
+        if valid_obj_ids is None:
+            valid_obj_ids = self.valid_strategy_obj_ids(self.strategies_cache)
+        known = set(self.published_obj_ids or set())
+        if scan:
+            known |= self.scan_retained_strategy_switches(client)
+        orphans = known - set(valid_obj_ids or set())
+        for orphan in sorted(orphans):
+            self._remove_switch_retained(client, orphan)
+        if orphans:
+            logger.info("[%s] Cleanup orfani completata: %d rimossi", self.id, len(orphans))
+        self.published_obj_ids = set(valid_obj_ids or set())
+        _save_published_ids(self.id, self.published_obj_ids)
 
     def publish_strategy_discovery(self, client: mqtt.Client, strategies: list, allow_empty_cleanup: bool = False):
         # Safety guard: una lettura temporaneamente vuota dalla webapp non deve cancellare
@@ -377,14 +486,8 @@ class GeyserDeviceWorker:
                 new_obj_ids.add(cobj)
                 count += 1
 
-        orphans = self.published_obj_ids - new_obj_ids
-        for orphan in orphans:
-            client.publish(self.disc_topic("switch", orphan), "", retain=True)
-            client.publish(self.state_topic(orphan), "", retain=True)
-            logger.info("[%s] Topic orfano rimosso: %s", self.id, orphan)
-
-        self.published_obj_ids = new_obj_ids
-        _save_published_ids(self.id, new_obj_ids)
+        self.cleanup_orphan_switches(client, valid_obj_ids=new_obj_ids, scan=True)
+        self.publish_strategy_index(client, strategies)
         logger.info("[%s] Autodiscovery strategie pubblicato (%d switch)", self.id, count)
 
     def publish_strategy_states(self, client: mqtt.Client, strategies: list):
@@ -687,6 +790,11 @@ class GeyserDeviceWorker:
             self.reload_strategies(client)
             return
 
+        if suffix == "cmd/cleanup_orphans":
+            self.cleanup_orphan_switches(client, scan=True)
+            self.publish_strategy_index(client, self.strategies_cache)
+            return
+
         logger.warning("[%s] Comando non riconosciuto: %s", self.id, suffix)
 
     def handle_set_geyser_settings(self, client: mqtt.Client, payload: str):
@@ -790,6 +898,7 @@ class GeyserDeviceWorker:
                 if s["id"] == strategy_id:
                     s["active"] = active
             self.local_overrides[strategy_id] = (active, time.time())
+            self.publish_strategy_index(client, self.strategies_cache)
             logger.info("[%s] Strategia %d → %s", self.id, strategy_id, state)
         else:
             logger.error("[%s] Set_StrategyStatus fallito per strategia %d", self.id, strategy_id)
@@ -804,6 +913,7 @@ class GeyserDeviceWorker:
                 for c in s.get("cycles", []):
                     if c["id"] == cycle_id:
                         c["active"] = active
+            self.publish_strategy_index(client, self.strategies_cache)
             logger.info("[%s] Ciclo %d → %s", self.id, cycle_id, state)
         else:
             logger.error("[%s] Set_CycleStatus fallito per ciclo %d", self.id, cycle_id)

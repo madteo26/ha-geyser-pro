@@ -1,5 +1,5 @@
 name: "Geyser PRO"
-version: "0.8.7"
+version: "0.8.10"
 slug: geyser_pro
 description: "Home Assistant integration for Stocker Geyser PRO mosquito repellent systems. MQTT autodiscovery, full CRUD for strategies/cycles, multi-device support."
 url: "https://github.com/madteo26/ha-geyser-pro"
