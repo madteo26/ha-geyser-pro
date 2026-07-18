@@ -142,6 +142,18 @@
     margin-top: 6px;
   }
 
+  .next-treatment-detail {
+    color: var(--text);
+    font-size: 12px;
+    line-height: 1.25;
+    margin-top: 8px;
+    min-height: 15px;
+  }
+
+  .next-treatment-detail.muted {
+    color: var(--muted);
+  }
+
   .bar-track {
     background: var(--surface2);
     border-radius: 4px;
@@ -513,6 +525,7 @@
   <div class="card">
     <div class="card-label">Prossimo trattamento</div>
     <div class="card-value" style="font-size:16px; padding-top:6px;" id="next-t">—</div>
+    <div class="card-sub next-treatment-detail muted" id="next-treatment-name">ciclo: —</div>
     <div class="card-sub" id="qs-status-text">Quick Start: —</div>
   </div>
 </div>
@@ -1069,7 +1082,18 @@ function updateUI(states) {
   if (co2 && l2) co2.textContent = l2name;
 
   const next = getStateVal(states, [`sensor.${ENTITY_PRE}_prossimo_trattamento`], 'Prossimo Trattamento', 'sensor') || '—';
-  document.getElementById('next-t').textContent = next.split(' - ')[0] || next;
+  const nextInfo = resolveNextTreatment(states, next);
+  document.getElementById('next-t').textContent = nextInfo.time || compactNextTime(next);
+  const nextNameEl = document.getElementById('next-treatment-name');
+  if (nextNameEl) {
+    if (nextInfo.name) {
+      nextNameEl.textContent = 'ciclo: ' + nextInfo.name;
+      nextNameEl.classList.remove('muted');
+    } else {
+      nextNameEl.textContent = nextInfo.hint || 'ciclo: —';
+      nextNameEl.classList.add('muted');
+    }
+  }
 
   const sync = getStateVal(states, [
     `sensor.${ENTITY_PRE}_sincronizzato`,
@@ -1195,6 +1219,55 @@ async function saveTankSettingsFromDashboard(tank) {
 }
 
 
+
+function firstTimeFromText(value) {
+  const s = String(value || '').trim();
+  const m = s.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+  if (!m) return '';
+  return String(parseInt(m[1], 10)).padStart(2, '0') + ':' + m[2];
+}
+
+function compactNextTime(value) {
+  const s = String(value || '').trim();
+  if (!s || s === 'unknown' || s === 'unavailable' || s === 'N/A') return '—';
+  const t = firstTimeFromText(s);
+  if (t) return t;
+  return s.split(' - ')[0] || s || '—';
+}
+
+function normalizeCycleLabelName(value) {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function resolveNextTreatment(states, nextRaw) {
+  const nextTime = firstTimeFromText(nextRaw);
+  const index = getStrategyIndex(states);
+  if (!nextTime) return { time: compactNextTime(nextRaw), name: '', hint: 'ciclo: —' };
+  if (!index) return { time: nextTime, name: '', hint: 'ciclo: indice non ancora disponibile' };
+
+  const candidates = [];
+  index.forEach(strat => {
+    const sid = String(strat.id);
+    const stratActive = switchState(states, 'strategia', sid, strat.active);
+    const cycles = Array.isArray(strat.cycles) ? strat.cycles : [];
+    cycles.forEach(c => {
+      const cycleId = String(c.id);
+      const label = normalizeCycleLabelName(c.label || ('Ciclo ' + cycleId));
+      const cycleTime = firstTimeFromText(label);
+      if (cycleTime !== nextTime) return;
+      const cycleActive = switchState(states, 'ciclo', cycleId, c.active);
+      candidates.push({ cycleLabel: label, stratActive, cycleActive, cycleId });
+    });
+  });
+
+  if (!candidates.length) return { time: nextTime, name: '', hint: 'ciclo: non identificato' };
+  const best = candidates.find(c => c.stratActive && c.cycleActive) ||
+               candidates.find(c => c.stratActive) ||
+               candidates[0];
+  return { time: nextTime, name: best.cycleLabel, hint: '' };
+}
 function getStrategyIndex(states) {
   const obj = getStateObj(states, [`sensor.${ENTITY_PRE}_strategy_index`], 'Strategy Index', 'sensor');
   const strategies = obj && obj.attributes && Array.isArray(obj.attributes.strategies) ? obj.attributes.strategies : null;

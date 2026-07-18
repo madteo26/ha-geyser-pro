@@ -1,6 +1,6 @@
 # Geyser PRO - Home Assistant Add-on
 
-![Version](https://img.shields.io/badge/version-0.8.10-green.svg)
+![Version](https://img.shields.io/badge/version-0.8.11-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
 Home Assistant add-on for the **Stocker Geyser PRO** mosquito repellent system.
@@ -19,6 +19,7 @@ Home Assistant add-on for the **Stocker Geyser PRO** mosquito repellent system.
 * Auto token injection: `dashboard_token` written automatically to `/config/www/geyser_token.js`
 * Webapp settings import: edit zone nozzles/tube length and tank liquid/dilution/type from the dashboard
 * Authoritative strategy index: dashboard renders strategies/cycles from `sensor.geyser_pro_<device>_strategy_index`, ignoring zombie retained MQTT switches
+* Next treatment detail: the dashboard shows both next scheduled time and matched cycle label/product
 * Retained MQTT orphan cleanup: the add-on scans Home Assistant MQTT discovery and removes stale strategy/cycle topics per device
 
 ## Entity naming

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.8.11] - 2026-06-21
+### Added
+- Dashboard next-treatment card now shows the matched cycle label/product next to the next scheduled time, using the authoritative strategy index.
+- If the next treatment time cannot be matched to a cycle, the dashboard keeps the time visible and shows a muted fallback instead of guessing.
+
 ## [0.8.10] - 2026-06-21
 ### Fixed
 - Dashboard now renders strategies and cycles from the authoritative `strategy_index` sensor instead of inferring relationships from retained MQTT switch entities.
