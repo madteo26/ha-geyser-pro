@@ -1241,12 +1241,45 @@ function normalizeCycleLabelName(value) {
     .trim();
 }
 
+function normalizedDaysMonSun(cycle) {
+  if (Array.isArray(cycle?.days_mon_sun) && cycle.days_mon_sun.length === 7) {
+    return cycle.days_mon_sun.map(v => Number(v) ? 1 : 0);
+  }
+
+  // Compatibilità con un eventuale strategy_index precedente: raw = DOM→SAB.
+  const raw = String(cycle?.days_raw || '');
+  if (/^[01]{7}$/.test(raw)) {
+    const positions = [1, 2, 3, 4, 5, 6, 0];
+    return positions.map(pos => raw[pos] === '1' ? 1 : 0);
+  }
+  return null;
+}
+
+function nextOccurrenceForCycle(cycle, now = new Date()) {
+  const cycleTime = firstTimeFromText(cycle?.time || cycle?.label || '');
+  const days = normalizedDaysMonSun(cycle);
+  if (!cycleTime || !days) return null;
+
+  const [hour, minute] = cycleTime.split(':').map(Number);
+  for (let offset = 0; offset <= 7; offset++) {
+    const candidate = new Date(now);
+    candidate.setDate(now.getDate() + offset);
+    candidate.setHours(hour, minute, 0, 0);
+    const mondayIndex = (candidate.getDay() + 6) % 7;
+    if (!days[mondayIndex]) continue;
+    if (candidate.getTime() <= now.getTime()) continue;
+    return candidate;
+  }
+  return null;
+}
+
 function resolveNextTreatment(states, nextRaw) {
   const nextTime = firstTimeFromText(nextRaw);
   const index = getStrategyIndex(states);
   if (!nextTime) return { time: compactNextTime(nextRaw), name: '', hint: 'ciclo: —' };
   if (!index) return { time: nextTime, name: '', hint: 'ciclo: indice non ancora disponibile' };
 
+  const now = new Date();
   const candidates = [];
   index.forEach(strat => {
     const sid = String(strat.id);
@@ -1255,17 +1288,29 @@ function resolveNextTreatment(states, nextRaw) {
     cycles.forEach(c => {
       const cycleId = String(c.id);
       const label = normalizeCycleLabelName(c.label || ('Ciclo ' + cycleId));
-      const cycleTime = firstTimeFromText(label);
+      const cycleTime = firstTimeFromText(c.time || label);
       if (cycleTime !== nextTime) return;
       const cycleActive = switchState(states, 'ciclo', cycleId, c.active);
-      candidates.push({ cycleLabel: label, stratActive, cycleActive, cycleId });
+      candidates.push({
+        cycleLabel: label,
+        stratActive,
+        cycleActive,
+        cycleId,
+        nextAt: nextOccurrenceForCycle(c, now)
+      });
     });
   });
 
   if (!candidates.length) return { time: nextTime, name: '', hint: 'ciclo: non identificato' };
-  const best = candidates.find(c => c.stratActive && c.cycleActive) ||
-               candidates.find(c => c.stratActive) ||
-               candidates[0];
+
+  const fullyActive = candidates.filter(c => c.stratActive && c.cycleActive);
+  const strategyActive = candidates.filter(c => c.stratActive);
+  const pool = fullyActive.length ? fullyActive : (strategyActive.length ? strategyActive : candidates);
+  const scheduled = pool.filter(c => c.nextAt instanceof Date && !Number.isNaN(c.nextAt.getTime()));
+  const best = scheduled.length
+    ? scheduled.sort((a, b) => a.nextAt.getTime() - b.nextAt.getTime())[0]
+    : pool[0];
+
   return { time: nextTime, name: best.cycleLabel, hint: '' };
 }
 function getStrategyIndex(states) {
@@ -1312,7 +1357,7 @@ function buildStrategies(states) {
             <div class="row-name">${escapeHtml(name)}</div>
           </div>
           <label class="toggle" style="margin-right:6px;">
-            <input type="checkbox" ${active ? 'checked' : ''} onchange="callService('switch', this.checked ? 'turn_on' : 'turn_off', '${eid}')">
+            <input type="checkbox" ${active ? 'checked' : ''} onchange="toggleStrategySwitch('${sid}', this.checked, this)">
             <span class="tog-slider"></span>
           </label>
           <button class="btn-delete" onclick="deleteStrategy(${sid})" title="Elimina">🗑</button>`;
@@ -1394,7 +1439,7 @@ function buildCycles(states) {
         div.innerHTML = `
           <div style="flex:1"><div class="row-name" style="font-size:13px;">${escapeHtml(label)}</div></div>
           <label class="toggle" style="margin-right:6px;">
-            <input type="checkbox" ${active ? 'checked' : ''} onchange="callService('switch', this.checked ? 'turn_on' : 'turn_off', '${eid}')">
+            <input type="checkbox" ${active ? 'checked' : ''} onchange="toggleCycleSwitch('${cycleId}', this.checked, this)">
             <span class="tog-slider"></span>
           </label>
           <button class="btn-delete" onclick="deleteCycle(${cycleId})" title="Elimina">🗑</button>`;
@@ -1410,14 +1455,38 @@ function buildCycles(states) {
 
 async function callService(domain, service, entity_id) {
   try {
-    await fetch(`${HA_URL}/api/services/${domain}/${service}`, {
+    const r = await fetch(`${HA_URL}/api/services/${domain}/${service}`, {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
       body: JSON.stringify({ entity_id })
     });
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${await r.text()}`);
     setTimeout(refreshStates, 1000);
   } catch(e) {
     console.error('Service call failed', e);
+    throw e;
+  }
+}
+
+async function toggleStrategySwitch(strategyId, checked, inputEl=null) {
+  try {
+    await mqttPublish(`${TOPIC_PRE}/strategia_${strategyId}/cmd`, checked ? 'ON' : 'OFF');
+    setTimeout(refreshStates, 700);
+    setTimeout(refreshStates, 2000);
+  } catch(e) {
+    console.error('Strategy toggle failed', strategyId, e);
+    if (inputEl) inputEl.checked = !checked;
+  }
+}
+
+async function toggleCycleSwitch(cycleId, checked, inputEl=null) {
+  try {
+    await mqttPublish(`${TOPIC_PRE}/ciclo_${cycleId}/cmd`, checked ? 'ON' : 'OFF');
+    setTimeout(refreshStates, 700);
+    setTimeout(refreshStates, 2000);
+  } catch(e) {
+    console.error('Cycle toggle failed', cycleId, e);
+    if (inputEl) inputEl.checked = !checked;
   }
 }
 
@@ -1513,11 +1582,14 @@ async function refreshStates() {
 }
 
 async function mqttPublish(topic, payload) {
-  return fetch(`${HA_URL}/api/services/mqtt/publish`, {
+  const mqttPayload = (typeof payload === 'string') ? payload : JSON.stringify(payload);
+  const r = await fetch(`${HA_URL}/api/services/mqtt/publish`, {
     method: 'POST',
     headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ topic, payload: JSON.stringify(payload) })
+    body: JSON.stringify({ topic, payload: mqttPayload })
   });
+  if (!r.ok) throw new Error(`MQTT publish HTTP ${r.status}: ${await r.text()}`);
+  return r;
 }
 
 async function deleteStrategy(strategyId) {
