@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.13] - 2026-08-30
+### Fixed
+- Fixed strategy and cycle toggles from the custom dashboard by publishing commands directly to the per-device MQTT command topics.
+- Removed dependency on Home Assistant-generated switch entity IDs when enabling or disabling strategies and cycles.
+- Added proper HTTP error handling for dashboard command requests.
+
 ## [0.8.12] - 2026-07-19
 ### Fixed
 - Next-treatment cycle matching now considers the cycle weekday mask as well as its time.
