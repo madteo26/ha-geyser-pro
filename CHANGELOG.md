@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.12] - 2026-07-19
+### Fixed
+- Next-treatment cycle matching now considers the cycle weekday mask as well as its time.
+- Fixed ambiguous matches when weekday and weekend cycles share the same hour.
+- `strategy_index` now publishes each cycle's normalized `days_mon_sun`, raw day mask and explicit time.
+
 ## [0.8.11] - 2026-06-21
 ### Added
 - Dashboard next-treatment card now shows the matched cycle label/product next to the next scheduled time, using the authoritative strategy index.

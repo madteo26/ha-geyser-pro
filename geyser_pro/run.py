@@ -1,5 +1,5 @@
 """
-Geyser PRO - Home Assistant Addon v0.8.11
+Geyser PRO - Home Assistant Addon v0.8.12
 MQTT bridge con autodiscovery per Stocker Geyser PRO.
 Multi-device ready: ogni device ha account Stocker, namespace MQTT, entity prefix,
 cache strategie e override locali separati.
@@ -41,7 +41,7 @@ POLL_INTERVAL = int(OPTIONS.get("poll_interval", 7))
 DASHBOARD_TOKEN = OPTIONS.get("dashboard_token", "")
 DISC_PREFIX = "homeassistant"
 TOPIC_ROOT = "geyser_pro"
-SW_VERSION = "0.8.11"
+SW_VERSION = "0.8.12"
 DEVICE_NAME_DEFAULT = "Geyser PRO"
 _OVERRIDE_TTL = 600  # 10 minuti
 
@@ -350,6 +350,9 @@ class GeyserDeviceWorker:
                     "id": cid,
                     "label": c.get("label", f"Ciclo {cid}"),
                     "active": bool(c.get("active", True)),
+                    "time": c.get("time", ""),
+                    "days_raw": c.get("days_raw", ""),
+                    "days_mon_sun": c.get("days_mon_sun", []),
                 })
             strategy_ids.append(sid)
             strategy_items.append({
@@ -644,12 +647,20 @@ class GeyserDeviceWorker:
                     time_str = detail.get("time", "")
                     dur = int(detail.get("nebulization", detail.get("duration", 0)))
                     days_raw = detail.get("days", "")
+                    # Get_Cycle espone la maschera come DOM,LUN,MAR,MER,GIO,VEN,SAB.
+                    # La normalizziamo una volta sola in LUN→DOM e la pubblichiamo
+                    # nello strategy_index, così la dashboard può distinguere due cicli
+                    # con lo stesso orario ma giorni diversi (es. feriale/weekend).
+                    positions = [1, 2, 3, 4, 5, 6, 0]
+                    days_mon_sun = []
+                    if isinstance(days_raw, str) and len(days_raw) == 7:
+                        days_mon_sun = [1 if days_raw[pos] == "1" else 0 for pos in positions]
+
                     if days_raw == all_days:
                         days_label = "ogni giorno"
-                    elif isinstance(days_raw, str) and len(days_raw) == 7:
+                    elif days_mon_sun:
                         labels = ["L", "M", "M", "G", "V", "S", "D"]
-                        positions = [1, 2, 3, 4, 5, 6, 0]
-                        active_days = "".join(labels[i] for i, pos in enumerate(positions) if days_raw[pos] == "1")
+                        active_days = "".join(labels[i] for i, enabled in enumerate(days_mon_sun) if enabled)
                         if active_days in ("LMMGVSD", ""):
                             days_label = "ogni giorno" if active_days else ""
                         elif active_days == "LMMGV":
@@ -663,7 +674,8 @@ class GeyserDeviceWorker:
                     else:
                         days_label = ""
 
-                    label = time_str or f"{int(detail.get('time_hour', 0)):02d}:{int(detail.get('time_minute', 0)):02d}"
+                    cycle_time = time_str or f"{int(detail.get('time_hour', 0)):02d}:{int(detail.get('time_minute', 0)):02d}"
+                    label = cycle_time
                     if dur:
                         label += f" · {dur}s"
                     if days_label:
@@ -674,6 +686,9 @@ class GeyserDeviceWorker:
                         label += f" · {tank_name}"
                     c["active"] = bool(detail.get("active", True))
                     c["label"] = label
+                    c["time"] = cycle_time
+                    c["days_raw"] = days_raw if isinstance(days_raw, str) else ""
+                    c["days_mon_sun"] = days_mon_sun
                 except Exception as e:
                     logger.debug("[%s] Get_Cycle %s fallito: %s", self.id, c.get("id"), e)
         return strategies
