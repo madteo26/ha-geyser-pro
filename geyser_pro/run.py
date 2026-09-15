@@ -12,6 +12,7 @@ import re
 import signal
 import sys
 import time
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 import paho.mqtt.client as mqtt
@@ -221,6 +222,7 @@ class GeyserDeviceWorker:
             }),
             ("sensor", "prossimo_trattamento", {
                 "name": "Prossimo Trattamento", "state_topic": self.state_topic("prossimo_trattamento"),
+                "json_attributes_topic": self.state_topic("prossimo_trattamento") + "_attr",
                 "icon": "mdi:clock-outline",
             }),
             ("sensor", "sincronizzato", {
@@ -238,6 +240,10 @@ class GeyserDeviceWorker:
             ("binary_sensor", "quickstart_attivo", {
                 "name": "Quick Start Attivo", "state_topic": self.state_topic("quickstart_attivo"),
                 "payload_on": "ON", "payload_off": "OFF", "icon": "mdi:play-circle",
+            }),
+            ("sensor", "quickstart_errore", {
+                "name": "Quick Start Errore", "state_topic": self.state_topic("quickstart_errore"),
+                "icon": "mdi:alert-circle-outline",
             }),
             ("sensor", "zona_1_nome", {
                 "name": "Zona 1 Nome", "state_topic": self.state_topic("zona_1_nome"),
@@ -528,6 +534,7 @@ class GeyserDeviceWorker:
         tank1 = max(0, int(status.get("tank_1_fill", 0)))
         tank2 = max(0, int(status.get("tank_2_fill", 0)))
         next_t = status.get("next_treatment_formatted", "N/A")
+        next_match = self.resolve_next_treatment(next_t)
         sync_at = status.get("synchronised_at", "N/A")
         qs_disabled = status.get("quickstart_disabled", True)
         qs_status = status.get("quickstart_status", 0)
@@ -549,6 +556,12 @@ class GeyserDeviceWorker:
         }
         for obj_id, value in payloads.items():
             client.publish(self.state_topic(obj_id), str(value), retain=True)
+
+        client.publish(
+            self.state_topic("prossimo_trattamento") + "_attr",
+            json.dumps(next_match),
+            retain=True,
+        )
 
         self.publish_status_attributes(
             client,
@@ -633,6 +646,85 @@ class GeyserDeviceWorker:
             wait = min(30 * retries, 300)
             logger.error("[%s] Login fallito — riprovo tra %ds", self.id, wait)
             time.sleep(wait)
+
+    # ------------------------------
+    # Matching prossimo trattamento → strategia/ciclo/prodotto
+    # ------------------------------
+    @staticmethod
+    def _first_time_from_text(value) -> Optional[str]:
+        m = re.search(r"\b([01]?\d|2[0-3]):([0-5]\d)\b", str(value or ""))
+        if not m:
+            return None
+        return f"{int(m.group(1)):02d}:{m.group(2)}"
+
+    def _next_occurrence_for_cycle(self, cycle: dict, now: datetime) -> Optional[datetime]:
+        """Replica nextOccurrenceForCycle() del dashboard JS: prossima data/ora
+        futura in cui il ciclo è schedulato, secondo days_mon_sun (Lun=0..Dom=6)."""
+        cycle_time = self._first_time_from_text(cycle.get("time") or cycle.get("label") or "")
+        days = cycle.get("days_mon_sun")
+        if not cycle_time or not days or len(days) != 7:
+            return None
+        hour, minute = (int(x) for x in cycle_time.split(":"))
+        for offset in range(0, 8):
+            candidate = (now + timedelta(days=offset)).replace(
+                hour=hour, minute=minute, second=0, microsecond=0
+            )
+            if not days[candidate.weekday()]:
+                continue
+            if candidate <= now:
+                continue
+            return candidate
+        return None
+
+    def resolve_next_treatment(self, next_raw) -> dict:
+        """Replica resolveNextTreatment() del dashboard JS lato addon, così
+        strategia/ciclo/prodotto sono disponibili come attributi HA nativi
+        e non solo nella UI del pannello.
+
+        Matching per orario (Stocker non lo espone) fra i cicli di
+        self.strategies_cache, con preferenza per i cicli con strategia+ciclo
+        entrambi attivi; a parità, il prossimo per days_mon_sun.
+        """
+        next_time = self._first_time_from_text(next_raw)
+        if not next_time:
+            return {"cycle_time": None}
+        if not self.strategies_cache:
+            return {"cycle_time": next_time}
+
+        now = datetime.now()
+        candidates = []
+        for s in self.strategies_cache:
+            strat_active = bool(s.get("active", True))
+            for c in s.get("cycles", []):
+                cycle_time = self._first_time_from_text(c.get("time") or c.get("label") or "")
+                if cycle_time != next_time:
+                    continue
+                candidates.append({
+                    "strategy_id": s.get("id"),
+                    "strategy_name": s.get("name"),
+                    "strategy_active": strat_active,
+                    "cycle_id": c.get("id"),
+                    "cycle_label": c.get("label"),
+                    "cycle_active": bool(c.get("active", True)),
+                    "next_at": self._next_occurrence_for_cycle(c, now),
+                })
+
+        if not candidates:
+            return {"cycle_time": next_time}
+
+        fully_active = [c for c in candidates if c["strategy_active"] and c["cycle_active"]]
+        strategy_active = [c for c in candidates if c["strategy_active"]]
+        pool = fully_active or strategy_active or candidates
+        scheduled = [c for c in pool if c["next_at"] is not None]
+        best = min(scheduled, key=lambda c: c["next_at"]) if scheduled else pool[0]
+
+        return {
+            "cycle_time": next_time,
+            "strategy_id": best["strategy_id"],
+            "strategy_name": best["strategy_name"],
+            "cycle_id": best["cycle_id"],
+            "cycle_label": best["cycle_label"],
+        }
 
     def enrich_strategies(self, strategies: list):
         if strategies is None:
@@ -896,12 +988,26 @@ class GeyserDeviceWorker:
             logger.error("[%s] output_valve deve essere 1 o 2", self.id); return
 
         logger.info("[%s] Avvio Quick Start: tank=%d, durata=%ds, zona=%d", self.id, tank, nebulization, output_valve)
-        ok = self.api.set_quickstart(tank=tank - 1 if tank > 0 else 0, nebulization=nebulization,
-                                     output_valve=output_valve, type_=type_)
+        # tank passato invariato: l'API Stocker usa nativamente 0=Pulizia, 1=S1, 2=S2
+        # per Set_Quickstart, confermato via HAR sull'app ufficiale il 2026-09-16
+        # (stessa convenzione già usata correttamente in create_cycle). La precedente
+        # trasformazione "tank - 1 if tank > 0 else 0" faceva eseguire Pulizia al posto
+        # di Serbatoio 1, e Serbatoio 1 al posto di Serbatoio 2.
+        ok, error_code = self.api.set_quickstart(tank=tank, nebulization=nebulization,
+                                                  output_valve=output_valve, type_=type_)
         if ok:
             client.publish(self.state_topic("quickstart_attivo"), "ON", retain=True)
+            client.publish(self.state_topic("quickstart_errore"), "", retain=True)
         else:
-            logger.error("[%s] Quick Start fallito.", self.id)
+            if error_code == 111:
+                msg = "Attendi almeno 30 minuti dall'ultimo trattamento prima di lanciarne un altro."
+                logger.warning(
+                    "[%s] Quick Start rifiutato: intervallo minimo di 30 minuti tra "
+                    "trattamenti non rispettato (error_code=111).", self.id)
+            else:
+                msg = f"Quick Start fallito (errore Stocker {error_code})."
+                logger.error("[%s] Quick Start fallito (error_code=%s).", self.id, error_code)
+            client.publish(self.state_topic("quickstart_errore"), msg, retain=True)
 
     def handle_strategy_toggle(self, client: mqtt.Client, strategy_id: int, payload: str):
         active = payload.strip().upper() == "ON"

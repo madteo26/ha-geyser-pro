@@ -192,14 +192,17 @@ class GeyserAPI:
         return None
 
     def set_quickstart(self, tank: int = 0, nebulization: int = 32,
-                       output_valve: int = 1, type_: int = 1) -> bool:
+                       output_valve: int = 1, type_: int = 1) -> tuple:
+        """Ritorna (ok, error_code). error_code=111 = intervallo minimo di 30 minuti
+        tra trattamenti non rispettato (osservato empiricamente il 2026-09-16)."""
         result = self._auth_call("Set_Quickstart", {
             "type":         type_,
             "tank":         str(tank),
             "nebulization": nebulization,
             "output_valve": str(output_valve),
         })
-        return result is not None and result.get("error_code", 1) == 0
+        error_code = result.get("error_code", 1) if result is not None else 1
+        return error_code == 0, error_code
 
     def check_quickstart(self):
         result = self._auth_call("Check_NewQuickStart", {})

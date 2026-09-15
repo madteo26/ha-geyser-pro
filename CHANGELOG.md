@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.8.16] - 2026-09-16
+### Added
+- `Set_Quickstart` ora ritorna anche `error_code` (non solo un booleano). Nuovo sensore `sensor.geyser_pro_<device>_quickstart_errore` pubblica un messaggio leggibile quando un Quick Start fallisce, invece del solo log.
+- `error_code=111` è mappato al messaggio "Attendi almeno 30 minuti dall'ultimo trattamento prima di lanciarne un altro" (limite minimo di 30 minuti tra trattamenti imposto da Stocker, osservato empiricamente).
+- Dashboard: il form Quick Start ora legge questo sensore dopo l'invio e mostra l'errore reale (es. il vincolo dei 30 minuti) invece del generico "Comando inviato ✓" quando il comando fallisce lato Stocker.
+
+## [0.8.15] - 2026-09-16
+### Fixed
+- **Bug critico in Quick Start**: `handle_quickstart` applicava `tank - 1 if tank > 0 else 0` prima di chiamare `Set_Quickstart`, ma l'API Stocker usa nativamente `0=Pulizia, 1=S1, 2=S2` senza offset (stessa convenzione già corretta in `create_cycle`). Effetto: un Quick Start su "Serbatoio 1" eseguiva "Pulizia", e uno su "Serbatoio 2" eseguiva "Serbatoio 1". Confermato via analisi HAR delle chiamate reali dell'app ufficiale Stocker (`tank: "0"`/`"1"`/`"2"` per Pulizia/S1/S2 rispettivamente). `tank` ora viene passato invariato.
+
+## [0.8.14] - 2026-09-14
+### Added
+- `sensor.geyser_pro_<device>_prossimo_trattamento` now exposes `strategy_id`, `strategy_name`, `cycle_id` and `cycle_label` (which already includes the product name) as attributes, computed server-side in the addon by matching the Stocker-reported time against `strategies_cache`.
+- This replicates the matching logic previously only available client-side in the dashboard (`resolveNextTreatment` in `geyser_dashboard_app.html`), so the info is now usable directly in HA automations/scripts without parsing the dashboard.
+
 ## [0.8.13] - 2026-08-30
 ### Fixed
 - Fixed strategy and cycle toggles from the custom dashboard by publishing commands directly to the per-device MQTT command topics.

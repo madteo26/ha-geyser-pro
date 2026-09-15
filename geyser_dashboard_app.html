@@ -1505,12 +1505,34 @@ function launchQuickstart() {
     body: JSON.stringify({ topic: `${TOPIC_PRE}/quickstart/cmd`, payload })
   })
   .then(() => {
-    document.getElementById('qs-feedback').textContent = 'Comando inviato ✓';
-    setTimeout(() => document.getElementById('qs-feedback').textContent = '', 3000);
+    setTimeout(checkQuickstartResult, 1500);
   })
   .catch(() => {
     document.getElementById('qs-feedback').textContent = 'Errore invio comando';
   });
+}
+
+async function checkQuickstartResult() {
+  const fb = document.getElementById('qs-feedback');
+  try {
+    const r = await fetch(`${HA_URL}/api/states/sensor.${ENTITY_PRE}_quickstart_errore`, {
+      headers: { 'Authorization': 'Bearer ' + TOKEN }
+    });
+    const s = await r.json();
+    const err = (s && s.state && s.state !== 'unknown' && s.state !== 'unavailable') ? s.state : '';
+    if (err) {
+      fb.textContent = '⚠ ' + err;
+      fb.style.color = 'var(--red, #f87171)';
+      setTimeout(() => { fb.textContent = ''; fb.style.color = ''; }, 8000);
+    } else {
+      fb.textContent = 'Comando inviato ✓';
+      fb.style.color = '';
+      setTimeout(() => fb.textContent = '', 3000);
+    }
+  } catch (e) {
+    fb.textContent = 'Comando inviato ✓';
+    setTimeout(() => fb.textContent = '', 3000);
+  }
 }
 
 // --- Zona tab ---
